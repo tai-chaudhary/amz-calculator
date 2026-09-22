@@ -1,0 +1,209 @@
+/* One typeface everywhere, so the portal looks the same on every computer.
+   The Good & General wordmark carries the brand identity. */
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    @apply bg-paper text-ink antialiased;
+    font-family: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  h1, h2, h3, h4 {
+    @apply text-ink;
+    font-family: 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-weight: 500;
+    letter-spacing: -0.025em;
+  }
+
+  button, input, select, textarea { font: inherit; }
+
+  :focus-visible {
+    outline: 2px solid theme('colors.royal.500');
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  ::selection { background: theme('colors.sky'); }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  /* Structure first: surfaces are quiet and hierarchy comes from spacing, rules and type. */
+  .page-shell { @apply w-full; }
+  .page-header { @apply mb-7 sm:mb-8; }
+  .page-eyebrow {
+    @apply text-[11px] font-semibold uppercase text-royal-500 mb-2;
+    letter-spacing: .14em;
+  }
+  .page-title { @apply text-[30px] sm:text-[34px] leading-[1.08] font-medium; }
+  .page-description { @apply text-sm text-ink/55 mt-2 max-w-2xl leading-relaxed; }
+  .page-meta { @apply flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink/45 mt-3; }
+
+  .card {
+    @apply bg-white border border-rule rounded-card p-5 shadow-card;
+  }
+  .card-flush { @apply bg-white border border-rule rounded-card shadow-card; }
+  .surface { @apply bg-white border border-rule rounded-card; }
+  .surface-muted { @apply bg-paper border border-rule rounded-card; }
+  .surface-sky { @apply bg-sky/55 border border-royal-200 rounded-card; }
+
+  .panel-alert  { @apply bg-white border-l-2 border-l-coral border-y border-r border-rule rounded-r-card p-4; }
+  .panel-notice { @apply bg-white border-l-2 border-l-warn border-y border-r border-rule rounded-r-card p-4; }
+  .panel-brand  { @apply bg-white border-l-2 border-l-royal-500 border-y border-r border-rule rounded-r-card p-4; }
+
+  .section-head { @apply flex items-start justify-between gap-4 pb-3 mb-4 border-b border-rule; }
+  .section-kicker { @apply text-[11px] font-semibold uppercase text-royal-500; letter-spacing: .12em; }
+  .section-title { @apply text-sm font-semibold text-ink; }
+  .section-description { @apply text-xs text-ink/50 mt-0.5 leading-relaxed; }
+
+  .metric-card {
+    @apply bg-white border border-rule rounded-card px-4 py-3.5;
+  }
+  .metric-label { @apply block text-[11px] font-medium text-ink/50 mb-1.5; }
+  .metric-value {
+    @apply font-semibold text-ink leading-tight text-[18px];
+    font-variant-numeric: tabular-nums;
+  }
+  .figure {
+    @apply text-ink leading-none font-medium;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.035em;
+  }
+
+  .input {
+    @apply w-full px-3 py-2.5 text-sm bg-white text-ink border border-rule rounded-[5px]
+           placeholder:text-ink/30
+           focus:outline-none focus:border-royal-400 focus:ring-4 focus:ring-royal-500/10
+           transition-colors;
+    font-variant-numeric: tabular-nums;
+  }
+  .input:disabled { @apply bg-paper text-ink/40; }
+  select.input {
+    @apply appearance-none pr-8 bg-no-repeat cursor-pointer;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%230B1B33' stroke-opacity='0.45' stroke-width='1.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-position: right 0.7rem center;
+  }
+  .label { @apply block text-[11px] font-semibold text-ink/55 mb-1.5; }
+  .field { @apply flex flex-col; }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-3.5 py-2.5 rounded-[5px] text-sm font-semibold
+           transition-colors whitespace-nowrap border border-transparent;
+  }
+  .btn:disabled { @apply opacity-40 cursor-not-allowed; }
+  .btn-primary   { @apply bg-royal-500 text-white hover:bg-royal-600 active:bg-royal-700; }
+  .btn-secondary { @apply bg-white text-ink border-rule hover:border-royal-300 hover:text-royal-600; }
+  .btn-success   { @apply bg-ink text-white hover:bg-royal-800; }
+  .btn-danger    { @apply bg-white text-loss border-loss/25 hover:bg-coral/10 hover:border-coral/50; }
+  .btn-ghost     { @apply text-ink/55 hover:text-royal-600 hover:bg-sky/45; }
+  .btn-coral     { @apply bg-coral text-ink hover:brightness-95; }
+  .btn-sm { @apply px-3 py-2 text-xs; }
+  .btn-xs { @apply px-2 py-1.5 text-xs gap-1.5; }
+  .icon-btn { @apply inline-flex items-center justify-center w-8 h-8 rounded-[5px] text-ink/45 hover:text-royal-600 hover:bg-sky/45 transition-colors; }
+
+  .nav-item {
+    @apply relative w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[5px] text-[13px] font-medium
+           text-ink/60 transition-colors;
+  }
+  .nav-item:hover { @apply bg-sky/40 text-royal-700; }
+  .nav-item-active { @apply bg-sky/60 text-royal-700 font-semibold; }
+  .nav-item-active::before {
+    content: '';
+    @apply absolute left-0 top-2 bottom-2 w-[2px] bg-royal-500 rounded-full;
+  }
+  .nav-section {
+    @apply text-[10px] font-semibold uppercase text-ink/35 px-3 mb-1.5 mt-1;
+    letter-spacing: .13em;
+  }
+  .nav-count { @apply ml-auto min-w-[22px] h-[20px] px-1.5 rounded-full bg-ink/5 text-ink/45 text-[10px] font-semibold flex items-center justify-center; }
+  .nav-item-active .nav-count { @apply bg-white/70 text-royal-700; }
+
+  .tab-row { @apply flex items-center gap-5 border-b border-rule overflow-x-auto; }
+  .tab {
+    @apply relative py-2.5 px-0 text-sm font-medium text-ink/50 transition-colors whitespace-nowrap rounded-none;
+  }
+  .tab:hover { @apply text-ink; }
+  .tab-active { @apply text-royal-600; }
+  .tab-active::after { content: ''; @apply absolute left-0 right-0 bottom-[-1px] h-[2px] bg-royal-500; }
+
+  /* Segmented control: filters within one list — visibly different from tabs */
+  .segmented { @apply inline-flex items-center gap-0.5 p-0.5 bg-ink/5 rounded-lg flex-wrap; }
+  .segment { @apply px-3 py-1.5 rounded-md text-sm font-medium text-ink/60 transition-colors whitespace-nowrap; }
+  .segment:hover { @apply text-ink; }
+  .segment-active { @apply bg-white text-royal-600 shadow-card; }
+
+  /* Cross-links: the same chip for a product, supplier, brand or listing everywhere */
+  .link-chip { @apply inline-flex items-center gap-1 max-w-[260px] px-2 py-0.5 rounded-md text-xs font-medium
+               bg-white border border-rule text-ink/70 transition-colors; }
+  .link-chip:not(:disabled):hover { @apply border-royal-300 text-royal-600 bg-royal-50; }
+  .link-chip:disabled { @apply cursor-default; }
+  .link-chip-amazon { @apply text-royal-600 border-royal-200; }
+  .link-chip-amazon:hover { @apply bg-royal-50; text-decoration: none; }
+
+  .table-shell { @apply bg-white border border-rule rounded-card overflow-hidden; }
+  .table-head { @apply bg-paper/70 border-b border-rule; }
+  .th { @apply text-[10px] uppercase tracking-[0.08em] font-semibold text-ink/45 py-3 px-3; }
+  .td { @apply py-3 px-3 text-sm border-b border-rule/70; }
+  .table-row { @apply transition-colors hover:bg-sky/20; }
+  .table-row:last-child .td { @apply border-b-0; }
+
+  .data-table { @apply w-full text-sm; }
+  .data-table thead { @apply bg-paper/70 border-b border-rule; }
+  .data-table th { @apply text-left px-3.5 py-3 text-[10px] uppercase tracking-[0.08em] font-semibold text-ink/45 whitespace-nowrap; }
+  .data-table td { @apply px-3.5 py-3 border-b border-rule/70 align-middle; }
+  .data-table tbody tr:last-child td { @apply border-b-0; }
+  .data-table tbody tr:hover { @apply bg-sky/20; }
+
+  .pill { @apply inline-flex items-center gap-1.5 text-[11px] font-semibold px-2 py-1 rounded-[4px] border; }
+  .pill-live    { @apply bg-lime/25 text-ink border-lime/50; }
+  .pill-paused  { @apply bg-ink/5 text-ink/55 border-rule; }
+  .pill-alert   { @apply bg-coral/10 text-loss border-coral/25; }
+  .pill-brand   { @apply bg-sky/55 text-royal-700 border-royal-200; }
+  .pill-quiet   { @apply bg-paper text-ink/50 border-rule; }
+  .badge { @apply pill; }
+  .badge-blue { @apply pill-brand; }
+  .badge-green { @apply bg-lime/25 text-ink border-lime/50; }
+  .badge-red { @apply bg-coral/10 text-loss border-coral/25; }
+  .badge-amber { @apply bg-warn/10 text-warn border-warn/20; }
+
+  .status-dot { @apply inline-block w-1.5 h-1.5 rounded-full; }
+  .val-gain { @apply text-gain font-semibold; }
+  .val-loss { @apply text-loss font-semibold; }
+
+  .result-row { @apply flex items-center justify-between gap-4 py-2 text-sm border-b border-rule/70 last:border-b-0; }
+  .pl-row { @apply flex items-center justify-between gap-4 py-2 text-sm border-b border-rule/70; }
+
+  .filter-bar { @apply flex flex-wrap items-center gap-2.5 p-3 bg-white border border-rule rounded-card; }
+  .filter-chip { @apply inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 bg-sky/45 text-royal-700 border border-royal-200 rounded-[4px]; }
+
+  .attention-row { @apply w-full flex items-center gap-3 px-3.5 py-3 text-left border-b border-rule/70 last:border-b-0 hover:bg-paper/65 transition-colors; }
+  .attention-icon { @apply w-8 h-8 flex items-center justify-center rounded-[5px] flex-shrink-0 bg-sky/55 text-royal-600; }
+  .attention-icon-alert { @apply bg-coral/10 text-loss; }
+
+  .command-kbd { @apply text-[10px] font-semibold text-ink/40 border border-rule bg-paper rounded-[3px] px-1.5 py-0.5; }
+
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: theme('colors.rule'); border-radius: 6px; border: 3px solid theme('colors.paper'); }
+  ::-webkit-scrollbar-thumb:hover { background: theme('colors.royal.200'); }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(24px); opacity: .6; }
+  to { transform: translateX(0); opacity: 1; }
+}
