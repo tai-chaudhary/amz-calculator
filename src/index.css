@@ -1,6 +1,7 @@
 /* One typeface everywhere, so the portal looks the same on every computer.
-   The Good & General wordmark carries the brand identity. */
-@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap');
+   The Good & General wordmark carries the brand identity. Figtree is loaded
+   from index.html (with a preconnect) so it starts downloading straight away
+   rather than after this stylesheet. */
 
 @tailwind base;
 @tailwind components;
@@ -13,6 +14,9 @@
   @media (pointer: coarse) {
     input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px !important; }
   }
+
+  /* No grey flash on every tap, and no 300ms wait for a double-tap zoom */
+  button, a, [role="button"], label { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
 
   body {
     @apply bg-paper text-ink antialiased;
@@ -201,6 +205,25 @@
   .attention-icon-alert { @apply bg-coral/10 text-loss; }
 
   .command-kbd { @apply text-[10px] font-semibold text-ink/40 border border-rule bg-paper rounded-[3px] px-1.5 py-0.5; }
+
+  /* Fingers need bigger targets than a mouse pointer */
+  @media (pointer: coarse) {
+    .icon-btn { @apply w-10 h-10; }
+    .nav-item { @apply py-3 text-sm; }
+    .btn-xs { @apply py-2; }
+    .btn-sm { @apply py-2.5; }
+    .segment { @apply py-2; }
+    .tab { @apply py-3; }
+  }
+
+  /* On a phone a wide table scrolls sideways inside its own box, instead of
+     dragging the whole page (header, menu button and all) along with it. */
+  @media (max-width: 1023px) {
+    :where(div, section):has(> table) {
+      overflow-x: auto !important;
+      -webkit-overflow-scrolling: touch;
+    }
+  }
 
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }

@@ -81,3 +81,14 @@ export const REF_FEE_OPTIONS = [
 ]
 
 export const SERVICE_LABELS = { standard: 'Standard', nextday: 'Next Day', prime: 'Prime' }
+
+// A blank calculator — shared so the app shell can reset it without loading the Calculator page
+export const EMPTY_CALC = {
+  sellPrice: '', costPrice: '', adCost: '', refFee: '15.3',
+  vatZero: false, weightKg: '', weightPerItem: '', weightOverride: false, letterbox: false,
+  serviceLevel: 'standard', carrierId: '', carrierCatId: '',
+  packagingId: '', ownPackaging: false, parcelSplit: false, numParcels: '2',
+  parcelWeights: [], parcelWeightsOverride: false,
+  asin: '', productUrl: '', brand: '', supplierName: '', supplierSku: '', supplierUrl: '', notes: '',
+  bundleQty: '1', costPerItem: '', monthlyVolume: '',
+}

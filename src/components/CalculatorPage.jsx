@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react'
 import { FEE_CATEGORIES, findFeeCategory, describeCategory, thresholdsFor, effectiveRate } from '../lib/feeSchedule'
 import { calcProduct, getSmartCarrier, effectiveWeight, priceForTargetMargin, fmt, fmtSigned, pct } from '../lib/calc'
-import { SERVICE_LABELS } from '../lib/defaults'
+import { SERVICE_LABELS, EMPTY_CALC } from '../lib/defaults'
 import {
   Input, Select, Checkbox, WarnBox, InfoBox, ResultRow, Modal,
   PageHeader, SectionHead, Icon, StatusBadge,
@@ -11,15 +11,7 @@ import FeeVerifier from './FeeVerifier'
 import { fillFromProducts } from '../lib/autofill'
 import { ListingConnections } from './Links'
 
-export const EMPTY_CALC = {
-  sellPrice: '', costPrice: '', adCost: '', refFee: '15.3',
-  vatZero: false, weightKg: '', weightPerItem: '', weightOverride: false, letterbox: false,
-  serviceLevel: 'standard', carrierId: '', carrierCatId: '',
-  packagingId: '', ownPackaging: false, parcelSplit: false, numParcels: '2',
-  parcelWeights: [], parcelWeightsOverride: false,
-  asin: '', productUrl: '', brand: '', supplierName: '', supplierSku: '', supplierUrl: '', notes: '',
-  bundleQty: '1', costPerItem: '', monthlyVolume: '',
-}
+export { EMPTY_CALC }
 
 export default function CalculatorPage({
   settings, savedProducts, stockItems = [], onCreateStockItem, onSaveProduct, onUpdateProduct,
@@ -221,7 +213,24 @@ export default function CalculatorPage({
         </div>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_390px] gap-5 items-start">
+      {/* Below xl the full result sits under the form, so keep the answer in view while typing */}
+      {r.sellPrice > 0 && (
+        <button type="button"
+          onClick={() => document.getElementById('calc-result')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+          className="xl:hidden fixed bottom-3 left-3 right-3 z-30 flex items-center justify-between gap-4 px-4 py-3 rounded-[7px] bg-royal-500 text-white shadow-modal text-left"
+          aria-label="Show the full result">
+          <span>
+            <span className="block text-[11px] text-white/65">Net profit / unit</span>
+            <span className="text-xl font-medium leading-tight tabular-nums">{r.incomplete ? '—' : fmtSigned(r.netProfit)}</span>
+          </span>
+          <span className="text-right">
+            <span className="block text-[11px] text-white/65">Margin</span>
+            <span className={`text-lg font-semibold leading-tight tabular-nums ${!r.incomplete && r.margin < 10 ? 'text-[#FFB4A8]' : ''}`}>{r.incomplete ? '—' : pct(r.margin)}</span>
+          </span>
+        </button>
+      )}
+
+      <div className={`grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_390px] gap-5 items-start ${r.sellPrice > 0 ? 'pb-20 xl:pb-0' : ''}`}>
         <div className="surface overflow-hidden">
           {/* Product */}
           <section className="p-5 sm:p-6">
@@ -497,7 +506,7 @@ export default function CalculatorPage({
         </div>
 
         {/* Live decision panel */}
-        <aside className="xl:sticky xl:top-6 space-y-4">
+        <aside id="calc-result" className="xl:sticky xl:top-6 space-y-4 scroll-mt-20">
           <div className="surface overflow-hidden shadow-lift">
             <div className="bg-royal-500 text-white p-5">
               <div className="text-xs font-semibold uppercase tracking-[0.12em] text-white/65">Live result</div>

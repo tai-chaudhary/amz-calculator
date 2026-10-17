@@ -1,5 +1,4 @@
 import React, { useState, useRef } from 'react'
-import * as XLSX from 'xlsx'
 import { parsePriceList, dateFromFileName, FORMATS } from '../lib/priceLists'
 import { fmt } from '../lib/calc'
 import { Icon, PageHeader, StatusBadge } from './UI'
@@ -50,6 +49,7 @@ export function ImportPanel({ suppliers, imports, onImport }) {
     if (!file) return
     setError(''); setParsed(null)
     try {
+      const XLSX = await import('xlsx')
       const wb = XLSX.read(await file.arrayBuffer())
       const r = parsePriceList(XLSX, wb)
       if (!r.format) {

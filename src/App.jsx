@@ -1,19 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react'
-import CalculatorPage, { EMPTY_CALC } from './components/CalculatorPage'
-import DashboardPage from './components/DashboardPage'
-import SavedPage from './components/SavedPage'
-import BuildMonthPage from './components/BuildMonthPage'
-import SettingsPage from './components/SettingsPage'
-import OverheadsPage from './components/OverheadsPage'
-import LiveProductsPage from './components/LiveProductsPage'
-import BulkUploadPage from './components/BulkUploadPage'
-import PortfolioPage from './components/PortfolioPage'
-import StockItemsPage from './components/StockItemsPage'
-import FamiliesPage from './components/FamiliesPage'
-import ProposedChangesPage from './components/ProposedChangesPage'
-import ApprovalsPage from './components/ApprovalsPage'
-import SuppliersPage from './components/SuppliersPage'
-import HunterPage from './components/HunterPage'
+import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react'
+import { EMPTY_CALC } from './lib/defaults'
 import { VERSION, BUILD_TIME } from './version'
 import { parseHeliumExport } from './lib/hunter'
 import { heliumDateFromFile } from './lib/hunts'
@@ -22,29 +8,12 @@ import { LinksProvider } from './components/Links'
 import { NAV, NAV_GROUPS, canAccess, visibleNav, pageLabel, landingPage, seesCosts } from './lib/access'
 import { buildSearchItems, searchItems } from './lib/search'
 import NoAccess from './components/NoAccess'
-import TeamPage from './components/TeamPage'
-import PurchasesPage from './components/PurchasesPage'
-import { PaymentsPage, IssuesPage } from './components/PaymentsPages'
-import PurchaseOrderDrawer from './components/PurchaseOrderDrawer'
-import PoBuilder from './components/PoBuilder'
-import AttachDocuments from './components/AttachDocuments'
-import PackagingPage from './components/PackagingPage'
-import StockRequestsPage from './components/StockRequestsPage'
-import GoodsInPage from './components/GoodsInPage'
-import InventoryPage from './components/InventoryPage'
-import WarehouseTasksPage from './components/WarehouseTasksPage'
-import NotificationsPage from './components/NotificationsPage'
 import { groupExpected, needsOffice as deliveryNeedsOffice, deliveryUnits } from './lib/goodsIn'
 import { URGENCY, requestState } from './lib/requests'
-import DispatchPage, { DispatchJobsPill, DispatchDashboardPage } from './components/DispatchPage'
 import { pdfToText, canReadFile } from './lib/pdfText'
 import { parseInvoice } from './lib/invoiceParse'
-import AddCompany from './components/AddCompany'
 import { received as poReceived, nextRepeat, PO_CATEGORIES, directoryOf } from './lib/purchases'
 import { fillFromProducts, calcFromProduct } from './lib/autofill'
-import ShippingPage from './components/ShippingPage'
-import ArchivePage from './components/ArchivePage'
-import ReviewPage from './components/ReviewPage'
 import LoginPage from './components/LoginPage'
 import { Icon } from './components/UI'
 import { supabase } from './lib/supabase'
@@ -73,6 +42,84 @@ import {
   loadInventory,
 } from './lib/db'
 import { stockState, needsRestock } from './lib/inventory'
+
+
+// Each page is its own download, fetched the first time it's opened (and
+// quietly in the background once the portal has loaded), so signing in only
+// waits for the shell rather than every page at once.
+const PAGE_MODULES = {
+  calculator: () => import('./components/CalculatorPage'),
+  dashboard: () => import('./components/DashboardPage'),
+  saved: () => import('./components/SavedPage'),
+  approvals: () => import('./components/ApprovalsPage'),
+  live: () => import('./components/LiveProductsPage'),
+  hunter: () => import('./components/HunterPage'),
+  stock: () => import('./components/StockItemsPage'),
+  suppliers: () => import('./components/SuppliersPage'),
+  brands: () => import('./components/PortfolioPage'),
+  purchases: () => import('./components/PurchasesPage'),
+  payments: () => import('./components/PaymentsPages'),
+  dispatch: () => import('./components/DispatchPage'),
+  requests: () => import('./components/StockRequestsPage'),
+  'goods-in': () => import('./components/GoodsInPage'),
+  inventory: () => import('./components/InventoryPage'),
+  tasks: () => import('./components/WarehouseTasksPage'),
+  families: () => import('./components/FamiliesPage'),
+  shipping: () => import('./components/ShippingPage'),
+  packaging: () => import('./components/PackagingPage'),
+  buildmonth: () => import('./components/BuildMonthPage'),
+  overheads: () => import('./components/OverheadsPage'),
+  bulk: () => import('./components/BulkUploadPage'),
+  archive: () => import('./components/ArchivePage'),
+  settings: () => import('./components/SettingsPage'),
+  team: () => import('./components/TeamPage'),
+  notifications: () => import('./components/NotificationsPage'),
+}
+PAGE_MODULES.carriers = PAGE_MODULES.companies = PAGE_MODULES.suppliers
+PAGE_MODULES.issues = PAGE_MODULES.payments
+PAGE_MODULES['dispatch-dashboard'] = PAGE_MODULES.dispatch
+const prefetchPage = (id) => { PAGE_MODULES[id]?.().catch(() => {}) }
+
+const lazyPage = (id, name = 'default') => lazy(() => PAGE_MODULES[id]().then(m => ({ default: m[name] })))
+const CalculatorPage = lazyPage('calculator')
+const DashboardPage = lazyPage('dashboard')
+const SavedPage = lazyPage('saved')
+const ApprovalsPage = lazyPage('approvals')
+const LiveProductsPage = lazyPage('live')
+const HunterPage = lazyPage('hunter')
+const StockItemsPage = lazyPage('stock')
+const SuppliersPage = lazyPage('suppliers')
+const PortfolioPage = lazyPage('brands')
+const PurchasesPage = lazyPage('purchases')
+const PaymentsPage = lazyPage('payments', 'PaymentsPage')
+const IssuesPage = lazyPage('payments', 'IssuesPage')
+const DispatchPage = lazyPage('dispatch')
+const DispatchDashboardPage = lazyPage('dispatch', 'DispatchDashboardPage')
+const DispatchJobsPill = lazyPage('dispatch', 'DispatchJobsPill')
+const StockRequestsPage = lazyPage('requests')
+const GoodsInPage = lazyPage('goods-in')
+const InventoryPage = lazyPage('inventory')
+const WarehouseTasksPage = lazyPage('tasks')
+const FamiliesPage = lazyPage('families')
+const ShippingPage = lazyPage('shipping')
+const PackagingPage = lazyPage('packaging')
+const BuildMonthPage = lazyPage('buildmonth')
+const OverheadsPage = lazyPage('overheads')
+const BulkUploadPage = lazyPage('bulk')
+const ArchivePage = lazyPage('archive')
+const SettingsPage = lazyPage('settings')
+const TeamPage = lazyPage('team')
+const NotificationsPage = lazyPage('notifications')
+const PurchaseOrderDrawer = lazy(() => import('./components/PurchaseOrderDrawer'))
+const PoBuilder = lazy(() => import('./components/PoBuilder'))
+const AttachDocuments = lazy(() => import('./components/AttachDocuments'))
+const AddCompany = lazy(() => import('./components/AddCompany'))
+
+const Spinner = () => (
+  <div className="flex items-center justify-center h-64" role="status" aria-label="Loading">
+    <div className="w-8 h-8 border-2 border-royal-500 border-t-transparent rounded-full animate-spin" />
+  </div>
+)
 
 
 // Old destinations still work: they land on where that job lives now
@@ -130,8 +177,17 @@ export default function App() {
   // Scroll to top only on a genuine page change
   useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }) }, [page])
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // The page behind the open menu shouldn't scroll along with it on a phone
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [sidebarOpen])
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandQuery, setCommandQuery] = useState('')
+  const [commandIndex, setCommandIndex] = useState(0)
+  useEffect(() => { setCommandIndex(0) }, [commandQuery, commandOpen])
   // null until it loads from the database. Anything above the `!settings` gate
   // further down runs on the first render, so read it with `settings?.` there
   // — a plain `settings.x` crashes the whole app to a blank page.
@@ -167,6 +223,7 @@ export default function App() {
   const [priceImports, setPriceImports] = useState([])
   const [proposals, setProposals] = useState([])
   const [marketListings, setMarketListings] = useState([])
+  const [marketLoaded, setMarketLoaded] = useState(false)
   const [asinMatches, setAsinMatches] = useState([])
   const [hunts, setHunts] = useState([])
   const [huntItems, setHuntItems] = useState([])
@@ -204,7 +261,7 @@ export default function App() {
         event.preventDefault()
         setCommandOpen(open => !open)
       }
-      if (event.key === 'Escape') setCommandOpen(false)
+      if (event.key === 'Escape') { setCommandOpen(false); setSidebarOpen(false) }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -315,10 +372,12 @@ export default function App() {
     async function init() {
       setLoading(true)
       try {
-        const [s, p, m, o, lp, ph, ch, sti, prof, sup, spr, imp, pc, ml, am, hs, hi, ss, po] = await Promise.all([
+        // Market listings (every Helium row ever imported) are only used by
+        // Product Hunter, so they load when that page is first opened instead.
+        const [s, p, m, o, lp, ph, ch, sti, prof, sup, spr, imp, pc, am, hs, hi, ss, po] = await Promise.all([
           loadSettings(), loadProducts(), loadMonths(), loadOverheads(), loadLiveProducts(), loadPriceHistory(), loadCostHistory(), loadStockItems(), loadProfiles(),
           loadSuppliers(), loadCatalogueStats(), loadPriceListImports(), loadProposedChanges(),
-          loadMarketListings(), loadAsinMatches(), loadHunts(), loadHuntItems(), loadSyncStatus(), loadPurchaseOrders()
+          loadAsinMatches(), loadHunts(), loadHuntItems(), loadSyncStatus(), loadPurchaseOrders()
         ])
         setSettings(s)
         setSavedProducts(p)
@@ -333,11 +392,11 @@ export default function App() {
         setProfiles(prof)
         setSuppliers(sup)
         setCatalogueStats(spr)
-        // Only the catalogue lines that match your own stock
-        setSupplierProducts(await loadCatalogueForStock(sti))
+        // Only the catalogue lines that match your own stock. It needs the stock
+        // list first, so it follows on without holding up the rest of the portal.
+        loadCatalogueForStock(sti).then(setSupplierProducts).catch(() => {})
         setPriceImports(imp)
         setProposals(pc)
-        setMarketListings(ml)
         setAsinMatches(am)
         setHunts(hs)
         setHuntItems(hi)
@@ -433,6 +492,35 @@ export default function App() {
       clearInterval(timer)
     }
   }, [session, loading, refreshShared])
+
+  // Once the portal is up, fetch the pages this person can open while the
+  // browser is idle, so moving between them never waits on a download
+  useEffect(() => {
+    if (loading || !me) return
+    const ids = visibleNav(me).flatMap(g => g.items.map(i => i.id))
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500))
+    const cancel = window.cancelIdleCallback || clearTimeout
+    let i = 0, handle
+    const next = () => { if (i < ids.length) { prefetchPage(ids[i++]); handle = idle(next) } }
+    handle = idle(next)
+    return () => cancel(handle)
+  }, [loading, me?.id, me?.permissions]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Product Hunter's market listings: fetched the first time the page is opened
+  useEffect(() => {
+    if (!session || page !== 'hunter' || marketLoaded) return
+    let cancelled = false
+    loadMarketListings()
+      .then(rows => { if (!cancelled) setMarketListings(prev => {
+        // Keep anything imported while this was loading
+        const byAsin = new Map(rows.map(r => [r.asin, r]))
+        prev.forEach(r => byAsin.set(r.asin, r))
+        return [...byAsin.values()]
+      }) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setMarketLoaded(true) })
+    return () => { cancelled = true }
+  }, [session, page, marketLoaded])
 
   const settingsVersion = React.useRef(null)
   const handleUpdateSettings = useCallback(async (newSettings) => {
@@ -1911,7 +1999,8 @@ export default function App() {
 
   // Everything findable with ⌘K lives in one place — see src/lib/search.js,
   // which every new module must be added to.
-  const commandItems = buildSearchItems({
+  // Building the search index touches every record, so only do it while search is open
+  const commandItems = !commandOpen ? [] : buildSearchItems({
     me, nav: NAV, listings: activeProducts, liveIds: everLiveIds, products: stockItems,
     purchaseOrders, companies: suppliers, hunts, directoryOf, packaging: settings?.packaging || [], dispatch: dispatchIndex,
     requests: stockRequests, deliveries: goodsIn.deliveries, inventory,
@@ -1948,11 +2037,11 @@ export default function App() {
       {sidebarOpen && <div className="fixed inset-0 bg-ink/30 backdrop-blur-[2px] z-20 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
-      <aside className={`fixed top-0 left-0 h-screen w-[258px] bg-white border-r border-rule flex flex-col z-30 transform transition-transform duration-200
+      <aside aria-label="Main menu" className={`fixed top-0 left-0 h-dvh w-[min(258px,85vw)] lg:w-[258px] bg-white border-r border-rule flex flex-col z-30 transform transition-transform duration-200
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:sticky lg:top-0 lg:z-auto lg:flex-shrink-0`}>
 
         <div className="px-5 pt-6 pb-4">
-          <img src="/logo.png" alt="Good &amp; General" className="w-full max-w-[158px]" />
+          <img src="/logo.png" alt="Good &amp; General" width="158" height="50" decoding="async" className="w-full max-w-[158px] h-auto" />
           <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink/35 mt-3">Commerce operations</div>
         </div>
 
@@ -1963,7 +2052,7 @@ export default function App() {
           >
             <Icon name="search" size={15} />
             <span className="text-xs flex-1">Search anything</span>
-            <span className="command-kbd">⌘K</span>
+            <span className="command-kbd hidden [@media(pointer:fine)]:inline">⌘K</span>
           </button>
         </div>
 
@@ -1978,6 +2067,9 @@ export default function App() {
                     <button
                       key={item.id}
                       onClick={() => { setPage(item.id); setSidebarOpen(false) }}
+                      onPointerEnter={() => prefetchPage(item.id)}
+                      onFocus={() => prefetchPage(item.id)}
+                      aria-current={page === item.id ? 'page' : undefined}
                       className={`nav-item ${page === item.id ? 'nav-item-active' : ''}`}
                     >
                       <Icon name={item.icon} size={16} className="flex-shrink-0" />
@@ -2003,11 +2095,11 @@ export default function App() {
               </div>
             </div>
           )}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <button onClick={handleSignOut} className="text-xs text-ink/45 hover:text-royal-600 transition-colors">Sign out</button>
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+            <div className="flex items-center gap-3">
+              <button onClick={handleSignOut} className="text-xs text-ink/45 hover:text-royal-600 transition-colors whitespace-nowrap py-1">Sign out</button>
               <button onClick={() => refreshShared({ silent: false })}
-                className="text-xs text-ink/35 hover:text-royal-600 transition-colors"
+                className="text-xs text-ink/35 hover:text-royal-600 transition-colors whitespace-nowrap inline-flex items-center gap-1 py-1"
                 title={`Data last read ${new Date(lastRefresh).toLocaleTimeString('en-GB')} — click to refresh now`}>
                 <Icon name="clock" size={12} /> {freshnessLabel}
               </button>
@@ -2024,18 +2116,14 @@ export default function App() {
       <main className="flex-1 flex flex-col min-w-0">
         {/* Top bar (mobile) */}
         <div className="lg:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-rule sticky top-0 z-10">
-          <button onClick={() => setSidebarOpen(true)} className="icon-btn -ml-1"><Icon name="menu" size={20} /></button>
-          <span className="font-semibold text-ink flex-1">{NAV.find(n => n.id === page)?.label || 'Calculator'}</span>
-          <button className="icon-btn -mr-1" onClick={() => { setCommandQuery(''); setCommandOpen(true) }}><Icon name="search" size={18} /></button>
+          <button onClick={() => setSidebarOpen(true)} className="icon-btn -ml-1" aria-label="Open menu" aria-expanded={sidebarOpen}><Icon name="menu" size={20} /></button>
+          <span className="font-semibold text-ink flex-1 truncate">{pageLabel(page)}</span>
+          <button className="icon-btn -mr-1" aria-label="Search" onClick={() => { setCommandQuery(''); setCommandOpen(true) }}><Icon name="search" size={18} /></button>
         </div>
 
         <div className="flex-1 px-4 py-5 sm:px-7 sm:py-7 lg:px-10 lg:py-9 xl:px-12 w-full max-w-[1500px]">
-          {loading || !settings ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="w-8 h-8 border-2 border-royal-500 border-t-transparent rounded-full animate-spin" />
-            </div>
-          ) : (
-            <>
+          {loading || !settings ? <Spinner /> : (
+            <Suspense fallback={<Spinner />}>
               {!allowed && (
                 <NoAccess page={page} me={me} onNavigate={navigateTo}
                   admins={profiles.filter(p => p.role === 'admin' && p.active !== false && p.id !== me?.id)} />
@@ -2281,7 +2369,8 @@ export default function App() {
                   />
                 </div>
               )}
-              {allowed && page === 'hunter' && (
+              {allowed && page === 'hunter' && !marketLoaded && <Spinner />}
+              {allowed && page === 'hunter' && marketLoaded && (
                 <div>
                 <HunterPage
                   hunts={hunts}
@@ -2455,14 +2544,14 @@ export default function App() {
                 />
                 </div>
               )}
-            </>
+            </Suspense>
           )}
         </div>
       </main>
 
       {commandOpen && (
-        <div className="fixed inset-0 z-[60] bg-ink/30 backdrop-blur-[2px] flex items-start justify-center px-4 pt-[9vh]" onMouseDown={e => e.target === e.currentTarget && setCommandOpen(false)}>
-          <div className="w-full max-w-xl bg-white border border-rule rounded-[7px] shadow-modal overflow-hidden">
+        <div className="fixed inset-0 z-[60] bg-ink/30 backdrop-blur-[2px] flex items-start justify-center px-3 sm:px-4 pt-3 sm:pt-[9vh]" onMouseDown={e => e.target === e.currentTarget && setCommandOpen(false)}>
+          <div className="w-full max-w-xl bg-white border border-rule rounded-[7px] shadow-modal overflow-hidden" role="dialog" aria-modal="true" aria-label="Search">
             <div className="relative border-b border-rule">
               <Icon name="search" size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/35" />
               <input
@@ -2470,20 +2559,31 @@ export default function App() {
                 value={commandQuery}
                 onChange={e => setCommandQuery(e.target.value)}
                 placeholder="Search pages, listings, ASINs, products…"
+                enterKeyHint="go" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Search"
                 className="w-full bg-white pl-11 pr-12 py-4 text-sm text-ink outline-none placeholder:text-ink/30"
                 onKeyDown={e => {
-                  if (e.key === 'Enter' && visibleCommands[0]) {
-                    visibleCommands[0].action(); setCommandOpen(false); setCommandQuery('')
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    const n = visibleCommands.length
+                    if (n) setCommandIndex(i => (i + (e.key === 'ArrowDown' ? 1 : n - 1)) % n)
+                  }
+                  const chosen = visibleCommands[commandIndex] || visibleCommands[0]
+                  if (e.key === 'Enter' && chosen) {
+                    chosen.action(); setCommandOpen(false); setCommandQuery('')
                   }
                 }}
               />
-              <span className="command-kbd absolute right-4 top-1/2 -translate-y-1/2">ESC</span>
+              <span className="command-kbd absolute right-4 top-1/2 -translate-y-1/2 hidden [@media(pointer:fine)]:inline">ESC</span>
+              <button className="icon-btn absolute right-2 top-1/2 -translate-y-1/2 [@media(pointer:fine)]:hidden" aria-label="Close search"
+                onClick={() => setCommandOpen(false)}><Icon name="close" size={18} /></button>
             </div>
-            <div className="max-h-[420px] overflow-y-auto p-2">
-              {visibleCommands.length ? visibleCommands.map(item => (
+            <div className="max-h-[min(420px,60dvh)] overflow-y-auto overscroll-contain p-2">
+              {visibleCommands.length ? visibleCommands.map((item, i) => (
                 <button
                   key={item.key}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-[5px] text-left hover:bg-sky/40 transition-colors"
+                  ref={i === commandIndex ? (el => el?.scrollIntoView({ block: 'nearest' })) : undefined}
+                  onMouseMove={() => i !== commandIndex && setCommandIndex(i)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-[5px] text-left hover:bg-sky/40 transition-colors ${i === commandIndex ? 'bg-sky/40' : ''}`}
                   onClick={() => { item.action(); setCommandOpen(false); setCommandQuery('') }}
                 >
                   <div className="w-8 h-8 rounded-[5px] bg-paper border border-rule flex items-center justify-center text-ink/55 flex-shrink-0">
@@ -2503,6 +2603,7 @@ export default function App() {
         </div>
       )}
 
+      <Suspense fallback={null}>
       {openPo && purchaseOrders.find(o => o.id === openPo) && (
         <PurchaseOrderDrawer
           po={purchaseOrders.find(o => o.id === openPo)}
@@ -2566,9 +2667,10 @@ export default function App() {
       {session && canAccess(me, 'dispatch') && page !== 'dispatch' && (
         <DispatchJobsPill onOpen={() => navigateTo('dispatch')} showToast={showToast} />
       )}
+      </Suspense>
       {toast && (
-        <div className={`fixed bottom-5 right-5 z-50 px-4 py-3 rounded-[5px] text-sm font-medium shadow-modal max-w-md flex items-center gap-4
-          ${toast.type === 'error' ? 'bg-loss text-white' : 'bg-ink text-white'}`} role="status">
+        <div className={`fixed bottom-3 left-3 right-3 sm:left-auto sm:bottom-5 sm:right-5 z-50 px-4 py-3 rounded-[5px] text-sm font-medium shadow-modal sm:max-w-md flex items-center justify-between gap-4
+          ${toast.type === 'error' ? 'bg-loss text-white' : 'bg-ink text-white'}`} role={toast.type === 'error' ? 'alert' : 'status'}>
           <span>{toast.msg}</span>
           {toast.action && (
             <button className="flex-shrink-0 font-semibold underline underline-offset-2 hover:no-underline"

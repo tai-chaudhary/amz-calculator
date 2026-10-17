@@ -410,15 +410,25 @@ export async function decideProposedChanges(ids, status, decidedBy) {
 
 // ── Product hunter ─────────────────────────────────────────────────────────────
 
+/**
+ * Every row of a large table. The first page also says how many rows there
+ * are, so the rest are fetched side by side rather than one after another.
+ * A page that fails is left out, as the page-by-page version used to.
+ */
+async function loadAllPages(table, columns, orderBy, size = 1000) {
+  const page = (i, opts) => supabase.from(table).select(columns, opts).order(orderBy).range(i * size, (i + 1) * size - 1)
+  const first = await page(0, { count: 'exact' })
+  if (first.error) return []
+  const all = [...(first.data || [])]
+  const total = first.count ?? all.length
+  if (all.length < size || total <= size) return all
+  const rest = await Promise.all(
+    Array.from({ length: Math.ceil(total / size) - 1 }, (_, i) => page(i + 1).then(r => r.error ? [] : (r.data || []))))
+  return all.concat(...rest)
+}
+
 export async function loadMarketListings() {
-  const all = []
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from('market_listings').select('*').range(from, from + 999)
-    if (error) return all
-    all.push(...(data || []))
-    if (!data || data.length < 1000) break
-  }
-  return all
+  return loadAllPages('market_listings', '*', 'asin')
 }
 
 export async function saveMarketListings(rows) {
@@ -471,16 +481,7 @@ export async function updateHunt(id, patch) {
 }
 
 export async function loadHuntItems() {
-  const all = []
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from('hunt_items')
-      .select('id, hunt_id, asin, disposition, reason, note, saved_product_id, decided_by, decided_at')
-      .range(from, from + 999)
-    if (error) return all
-    all.push(...(data || []))
-    if (!data || data.length < 1000) break
-  }
-  return all
+  return loadAllPages('hunt_items', 'id, hunt_id, asin, disposition, reason, note, saved_product_id, decided_by, decided_at', 'id')
 }
 
 /** Updates many items at once; each keeps its own id. */

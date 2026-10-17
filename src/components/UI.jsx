@@ -97,7 +97,14 @@ function useDialog(onClose) {
       }
     }
     document.addEventListener('keydown', onKey)
-    return () => { document.removeEventListener('keydown', onKey); previous?.focus?.() }
+    // The page underneath stays put while a dialog is open (phones otherwise scroll it)
+    const overflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.body.style.overflow = overflow
+      previous?.focus?.()
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return ref
 }
@@ -219,9 +226,10 @@ export function Modal({ title, description, onClose, children, maxWidth = 'max-w
   const ref = useDialog(onClose)
   const titleId = React.useId()
   return (
-    <div className="fixed inset-0 bg-ink/35 backdrop-blur-[2px] flex items-center justify-center z-50 p-4" onMouseDown={e => e.target === e.currentTarget && onClose?.()}>
+    <div className="fixed inset-0 bg-ink/35 backdrop-blur-[2px] flex items-end sm:items-center justify-center z-50 sm:p-4" onMouseDown={e => e.target === e.currentTarget && onClose?.()}>
+      {/* A sheet from the bottom on phones, where thumbs reach; centred on larger screens */}
       <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={titleId}
-        className={`bg-paper border border-rule rounded-[7px] w-full ${maxWidth} shadow-modal overflow-hidden max-h-[90vh] flex flex-col`}>
+        className={`bg-paper border border-rule rounded-t-[10px] sm:rounded-[7px] w-full ${maxWidth} shadow-modal overflow-hidden max-h-[92dvh] sm:max-h-[90dvh] flex flex-col`}>
         <div className="flex items-start justify-between gap-4 px-5 py-4 bg-white border-b border-rule">
           <div>
             <div id={titleId} className="font-semibold text-base text-ink">{title}</div>
@@ -229,7 +237,7 @@ export function Modal({ title, description, onClose, children, maxWidth = 'max-w
           </div>
           <button onClick={onClose} className="icon-btn -mr-1 -mt-1" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
-        <div className="p-5 overflow-y-auto">{children}</div>
+        <div className="p-5 overflow-y-auto overscroll-contain">{children}</div>
       </div>
     </div>
   )
@@ -250,7 +258,7 @@ export function Drawer({ title, description, onClose, children, footer, width = 
           </div>
           <button onClick={onClose} className="icon-btn flex-shrink-0" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 sm:px-6 py-5">{children}</div>
+        <div className="flex-1 overflow-y-auto overscroll-contain px-5 sm:px-6 py-5">{children}</div>
         {footer && <div className="px-5 sm:px-6 py-4 bg-white border-t border-rule">{footer}</div>}
       </aside>
     </div>

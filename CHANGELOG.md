@@ -3,6 +3,27 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.30.1 — 17 Oct 2026
+- Faster to open: each page now downloads the first time it's used (and quietly in the background
+  after sign-in), instead of the whole portal up front. The first download is about a quarter of
+  what it was (~190 KB instead of ~710 KB compressed), and libraries sit in their own files so a new
+  release only re-downloads the portal's own code
+- Spreadsheet reading (Inventory set up, supplier price lists) loads only when a file is chosen
+- Product Hunter's market listings load when Product Hunter is opened, not for everyone at sign-in;
+  large lists (market listings, hunt items) now fetch their pages side by side
+- Sign-in no longer waits on the supplier catalogue lookup; ⌘K only builds its index while open
+- Search (⌘K): arrow keys move through the results; on phones there's a close button and the list
+  fits above the keyboard
+- Phones: the menu fills the real screen height (Sign out no longer hides under the browser bar), closes
+  with Escape, and the page behind it no longer scrolls. Pop-ups open as sheets from the bottom and
+  stop the page behind from scrolling. Bigger tap targets for buttons, menu items, tabs and filters.
+  Wide tables scroll inside their own box instead of dragging the whole page sideways. Messages
+  run full width at the bottom of the screen
+- Calculator on phones and tablets: profit and margin stay pinned at the bottom while you type; tap
+  it to jump to the full result
+- Cost Settings: carrier and packaging tables no longer squash their boxes on phones
+- Font loads in parallel with the app rather than after it
+
 ## v2.30.0 — 17 Oct 2026
 - HELM connected (read only): the portal reads HELM's orders every minute through HELM's Public API.
   The key is in the helm-sync function's secrets. Customer names, addresses, phones and emails are

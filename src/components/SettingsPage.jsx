@@ -157,7 +157,7 @@ function CarriersSettings({ settings, onUpdateSettings }) {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[620px] text-sm">
             <thead>
               <tr className="border-b border-rule">
                 <th className="text-left py-2 text-xs font-semibold text-ink/45 pr-3">Category name</th>
@@ -209,7 +209,7 @@ function PackagingSettings({ settings, onUpdateSettings }) {
         <button className="btn btn-secondary btn-sm" onClick={addPkg}>+ Add packaging</button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full min-w-[560px] text-sm">
           <thead>
             <tr className="border-b border-rule">
               <th className="text-left py-2 text-xs font-semibold text-ink/45">Name</th>

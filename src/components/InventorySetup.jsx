@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo } from 'react'
-import * as XLSX from 'xlsx'
 import { Icon, StatusBadge, SearchInput } from './UI'
 import { num } from './InventoryParts'
 import {
@@ -51,6 +50,7 @@ function CountImport({ me, started, meta, showToast, onDone }) {
   const load = async (f) => {
     setFile(f); setRead(null); setResult(null)
     try {
+      const XLSX = await import('xlsx')
       const wb = XLSX.read(await f.arrayBuffer())
       const name = wb.SheetNames.find(n => /stock by location/i.test(n)) || wb.SheetNames[0]
       const aoa = XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' })
