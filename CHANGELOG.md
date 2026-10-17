@@ -3,6 +3,15 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.31.1 — 18 Oct 2026
+- New Orders rebuilt to be easier to read. One list at a time, chosen from tabs: Today, each later
+  day (Mon 19 Oct…), Past ship-by, Labelled and Needs attention (office). Each line shows the quantity
+  per parcel as a badge, then the product in normal case, then how many orders; tap it for the order
+  refs. Couriers have their own headings that stay at the top while scrolling. A search box appears
+  on longer lists. Flags (past ship-by, short, not linked in HELM, oldest) sit under the totals
+- On a laptop the card fits the screen and its list scrolls on its own: scrolling through Monday's
+  orders no longer scrolls the whole page
+
 ## v2.31.0 — 18 Oct 2026
 - Dispatch redesigned. The day at the top (‹ day ›, time to the cut-off, delayed and on-hold
   flags), then one bar for every label from To print → Picking & packing → Ready → Dispatched; tap a
