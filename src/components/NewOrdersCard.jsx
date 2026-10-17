@@ -100,9 +100,10 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
     if (!o) return
     setOpen(true)
     const later = o.phase === 'new' && o.ship_day > today
-    const lineKey = later ? `day-${o.ship_day}||${stampOf(o)}` : o.phase === 'new' ? `new|${o.carrier || 'No courier set'}|${stampOf(o)}`
+    const isLate = o.phase === 'new' && o.ship_day && o.ship_day < today
+    const lineKey = later ? `day-${o.ship_day}||${stampOf(o)}` : isLate ? `late||${stampOf(o)}` : o.phase === 'new' ? `new|${o.carrier || 'No courier set'}|${stampOf(o)}`
       : o.phase === 'labelled' ? `labelled||${stampOf(o)}` : `attention||${stampOf(o)}`
-    setExpanded(s => new Set([...s, lineKey, later ? `day-${o.ship_day}-section` : o.phase === 'labelled' ? 'labelled-section' : 'backorder-section']))
+    setExpanded(s => new Set([...s, lineKey, later ? `day-${o.ship_day}-section` : isLate ? 'late-section' : o.phase === 'labelled' ? 'labelled-section' : 'backorder-section']))
     setTimeout(() => focusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 200)
   }, [focus, orders.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -124,6 +125,21 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
       onLog?.({ entity_type: 'dispatch', entity_name: 'Order cut-off', action: 'Changed', detail: Object.entries(clean).map(([k, v]) => `${k === 'default' ? 'Mon–Fri' : k === 'saturday' ? 'Saturday' : k} ${v}`).join(', '), source: 'dispatch' })
       setCutEdit(null); showToast?.('Cut-off saved'); load()
     } catch (e) { showToast?.(e?.message || 'Couldn’t save', 'error') }
+  }
+
+  // Orders that went another way (an Amazon label from the old portal, say) sit in HELM for good.
+  // Clearing them all at once stops them holding stock and showing as late.
+  const clearMany = async (list, why) => {
+    if (!list.length) return
+    if (!window.confirm(`Clear ${plural(list.length, 'order')}? ${why}\n\nThey stop counting as open orders and won't show here again. HELM itself isn't changed.`)) return
+    let n = 0
+    try {
+      for (const o of list) { await clearHelmOrder(o.id, me?.name || me?.email); n++ }
+      onLog?.({ entity_type: 'dispatch', entity_name: `${plural(n, 'HELM order')}`, action: 'Cleared HELM orders',
+        detail: `${why} — ${list.slice(0, 12).map(o => o.ref || o.order_number).join(', ')}${list.length > 12 ? '…' : ''}`, source: 'dispatch' })
+      showToast?.(`${plural(n, 'order')} cleared`)
+    } catch (e) { showToast?.(`${n} cleared, then: ${e?.message || 'couldn’t clear the rest'}`, 'error') }
+    load()
   }
 
   const clear = async (o) => {
@@ -167,7 +183,7 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
                 <span className="ml-auto tabular-nums text-ink/45 shrink-0">
                   {phase === 'labelled' ? `labelled ${ago(o.labelled_at, now)} ago` : ago(o.order_date, now)}
                 </span>
-                {office && phase !== 'new' && (
+                {office && (phase !== 'new' || (o.ship_day && o.ship_day < today)) && (
                   <button className="text-ink/40 hover:text-loss shrink-0" title="Won't come through Dispatch: stop counting it" onClick={() => clear(o)}>Clear</button>
                 )}
               </div>
@@ -196,8 +212,8 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
         )}
         {shortCount > 0 && <span className="badge badge-red">{plural(shortCount, 'product')} short</span>}
         {missingCount > 0 && (
-          <span className="badge badge-amber" title="These item codes aren't in Inventory, so there's no stock check and no stock held for them">
-            {missingCount} not in inventory
+          <span className="badge badge-amber" title="HELM sent item codes that aren't linked to an inventory product — fix the link in HELM. Until then there's no stock check and no stock held for them">
+            {missingCount} not linked in HELM
           </span>
         )}
         {labelled.length > 0 && <span className={`badge ${labelLate ? 'badge-amber' : 'badge-blue'}`}>{labelled.length} labelled, awaiting upload</span>}
@@ -215,7 +231,20 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
 
           {data && !fresh.length && <div className="px-4 py-3 text-sm text-ink/50">No new orders for today{laterDays.length ? ' — the rest ship on a later day' : ''}.</div>}
 
-          {byCarrier(fresh).map(([carrier, list]) => (
+          {late.length > 0 && (
+            <Section k="late-section" expanded={expanded} toggle={toggle} tone="alert"
+              title={`Past ship-by: ${plural(late.length, 'order')} · ${fmt(units(late))} units`}
+              sub={office ? 'should have gone already — or went another way (e.g. an Amazon label from the old portal) and can be cleared' : 'should have gone already — label these first'}
+              action={office && (
+                <button className="btn btn-secondary btn-xs" onClick={(e) => { e.stopPropagation(); clearMany(late, 'Past their ship-by day — shipped another way.') }}>
+                  Clear all {late.length}
+                </button>
+              )}>
+              {linesOf(late, stampOf).map(line => <Line key={line.stamp} line={line} k={`late||${line.stamp}`} phase="new" />)}
+            </Section>
+          )}
+
+          {byCarrier(fresh.filter(o => !late.includes(o))).map(([carrier, list]) => (
             <div key={carrier} className="border-b border-rule last:border-b-0">
               <div className="flex items-baseline justify-between px-4 pt-3 pb-1">
                 <span className="text-xs font-semibold uppercase tracking-wide text-royal-700">{carrier}</span>
@@ -241,7 +270,12 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
           {labelled.length > 0 && (
             <Section k="labelled-section" expanded={expanded} toggle={toggle} tone={labelLate ? 'warn' : 'brand'}
               title={`Labelled – awaiting upload: ${plural(labelled.length, 'order')}`}
-              sub={labelLate ? `oldest labelled ${ago(oldestLabel, now)} ago — upload the labels` : 'labels made in HELM, not uploaded here yet'}>
+              sub={labelLate ? `oldest labelled ${ago(oldestLabel, now)} ago — upload the labels` : 'labels made in HELM, not uploaded here yet'}
+              action={office && labelled.some(o => minsSince(o.labelled_at, now) > 24 * 60) && (
+                <button className="btn btn-secondary btn-xs" onClick={(e) => { e.stopPropagation(); clearMany(labelled.filter(o => minsSince(o.labelled_at, now) > 24 * 60), 'Labelled over a day ago and never uploaded here — shipped another way.') }}>
+                  Clear {labelled.filter(o => minsSince(o.labelled_at, now) > 24 * 60).length} over a day old
+                </button>
+              )}>
               {linesOf(labelled, stampOf).map(line => <Line key={line.stamp} line={line} k={`labelled||${line.stamp}`} phase="labelled" />)}
             </Section>
           )}
@@ -284,18 +318,21 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
   )
 }
 
-function Section({ k, title, sub, tone, expanded, toggle, children }) {
+function Section({ k, title, sub, tone, expanded, toggle, action, children }) {
   const isOpen = expanded.has(k)
   const bar = tone === 'alert' ? 'border-l-coral' : tone === 'warn' ? 'border-l-warn' : 'border-l-royal-500'
   return (
     <div className={`border-t border-rule border-l-2 ${bar}`}>
-      <button className="w-full flex items-start gap-2 px-4 py-2.5 text-left hover:bg-paper/70" onClick={() => toggle(k)}>
-        <Icon name={isOpen ? 'chevronDown' : 'chevronRight'} size={14} className="mt-0.5 text-ink/40 shrink-0" />
-        <span className="flex-1 min-w-0">
-          <span className="block text-sm font-semibold text-ink">{title}</span>
-          {sub && <span className={`block text-xs ${tone === 'warn' ? 'text-warn' : 'text-ink/50'}`}>{sub}</span>}
-        </span>
-      </button>
+      <div className="flex items-start gap-2 pr-3">
+        <button className="flex-1 min-w-0 flex items-start gap-2 px-4 py-2.5 text-left hover:bg-paper/70" onClick={() => toggle(k)} aria-expanded={isOpen}>
+          <Icon name={isOpen ? 'chevronDown' : 'chevronRight'} size={14} className="mt-0.5 text-ink/40 shrink-0" />
+          <span className="flex-1 min-w-0">
+            <span className={`block text-sm font-semibold ${tone === 'alert' ? 'text-loss' : 'text-ink'}`}>{title}</span>
+            {sub && <span className={`block text-xs ${tone === 'warn' ? 'text-warn' : 'text-ink/50'}`}>{sub}</span>}
+          </span>
+        </button>
+        {action && <div className="pt-2 shrink-0">{action}</div>}
+      </div>
       {isOpen && <div className="divide-y divide-rule/60 px-1 pb-1">{children}</div>}
     </div>
   )
@@ -307,7 +344,7 @@ function StockFlag({ c, more = 0, named = false }) {
     ? `${who}short — need ${fmt(c.need)}, ${fmt(c.free)} in stock`
     : c.level === 'topup'
       ? `${who}top up the pick shelf — need ${fmt(c.need)}, ${fmt(c.pickFree)} on it`
-      : `${named ? `${c.code}: ` : ''}not in inventory — no stock check`
+      : `${named ? `${c.code}: ` : ''}item code not linked to inventory — fix the link in HELM`
   const tone = c.level === 'short' ? 'text-loss' : 'text-warn'
   return (
     <span className={`block text-xs mt-0.5 ${tone}`}>

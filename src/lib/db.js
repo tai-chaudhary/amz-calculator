@@ -1342,3 +1342,25 @@ export const invSetCost = (productId, cost, by) => rpc('inv_set_cost', { p_produ
 export const loadHelmNewOrders = () => rpc('helm_new_orders')
 export const clearHelmOrder = (id, by) => rpc('helm_clear_order', { p_id: id, p_by: by || null })
 export const setHelmCutoffs = (cutoffs, by) => rpc('helm_set_cutoffs', { p_cutoffs: cutoffs, p_by: by || null })
+
+// ── Pick lists and substitutes ──
+/** Products to pick for these batches (labels still to go, or dispatched too), with their shelves and any substitutes. */
+export const loadPickList = (batchIds, { includeDispatched = false } = {}) =>
+  rpc('dispatch_pick_list', { p_batches: batchIds, p_all: includeDispatched })
+/** Every active product, for choosing what was sent instead. */
+export const loadProductPicker = () => rpc('inv_product_picker')
+/**
+ * Record what went instead of `productId` on these orders ([{ upload_id, order_key }]).
+ * `ratio` is substitute units per unit ordered. A null `subId` takes the substitute back off.
+ */
+export const setSubstitute = (orders, productId, subId, ratio, by, note = null) =>
+  rpc('dispatch_set_substitute', { p_orders: orders, p_product: productId, p_sub: subId, p_ratio: ratio, p_by: by || null, p_note: note })
+export async function loadSubstitutes({ from, to, uploadIds } = {}) {
+  let q = supabase.from('dispatch_substitutes').select('*').order('created_at', { ascending: false }).limit(2000)
+  if (from) q = q.gte('created_at', `${from}T00:00:00`)
+  if (to) q = q.lt('created_at', `${to}T23:59:59.999`)
+  if (uploadIds?.length) q = q.in('upload_id', uploadIds)
+  const { data, error } = await q
+  if (error) throw error
+  return data || []
+}

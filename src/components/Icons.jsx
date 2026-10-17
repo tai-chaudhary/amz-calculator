@@ -25,6 +25,8 @@ const paths = {
   close: <path d="m6 6 12 12M18 6 6 18"/>,
   chevronDown: <path d="m7 10 5 5 5-5"/>,
   chevronRight: <path d="m9 6 6 6-6 6"/>,
+  chevronLeft: <path d="m15 6-6 6 6 6"/>,
+  swap: <><path d="M7 4 3 8l4 4M3 8h14"/><path d="m17 12 4 4-4 4M21 16H7"/></>,
   edit: <><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4L16.5 3.5Z"/></>,
   trash: <><path d="M4 7h16M9 7V4h6v3M7 7l1 14h8l1-14M10 11v6M14 11v6"/></>,
   send: <><path d="m22 2-7 20-4-9-9-4 20-7Z"/><path d="M11 13 22 2"/></>,

@@ -5,7 +5,7 @@ import {
   loadHeldLabels, loadDispatchUploads, loadDispatchLabel, downloadDispatchFile, saveDispatchUpload,
   releaseHeldLabels, cancelDispatchLabels, markBatchesPrinted,
   loadBatchStats, loadOpenLabels, dispatchBatch, dispatchLabelIds, searchDispatchLabels, markLabelReprinted, loadDayLabels,
-  packBatch, loadDashboardLabels, loadItemUnits, saveItemUnits,
+  packBatch, loadDashboardLabels, loadItemUnits, saveItemUnits, loadSubstitutes,
 } from '../lib/db'
 import {
   itemKey, suggestLabelName, londonDate, decode, planUpload, manualSlip, samePostcode, summariseDispatch, guessUnits, normRef,
@@ -17,6 +17,7 @@ import { exportRowsToCsv, stampedName } from '../lib/csv'
 import { buildPrintFile, printPdf, downloadPdf, buildCollectionSheet, pagesAsImages } from '../lib/dispatchPdf'
 import { startJob, subscribeJobs, dismissJob, toldJobs } from '../lib/dispatchJobs'
 import NewOrdersCard from './NewOrdersCard'
+import { PickList, ShortCheck, SubstituteFlow } from './PickList'
 
 // The carriers and services a label can be put down as when it couldn't be read
 const CARRIERS = { DHL: ['Next Day'], Evri: ['Next Day', 'Standard'] }
@@ -25,7 +26,8 @@ const CARRIERS = { DHL: ['Next Day'], Evri: ['Next Day', 'Standard'] }
 let HELM_NAMES = new Map()
 let HELM_UNITS = new Map()
 
-const nextDay = (d) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10) }
+const addDays = (d, n) => { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10) }
+const nextDay = (d) => addDays(d, 1)
 
 // Who printed last on this computer, offered first next time
 let lastPerson = ''
@@ -316,53 +318,87 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
   const allShownPicked = shownFiles.length > 0 && shownFiles.every(f => picked.has(f.id))
   const pickedList = batches.filter(b => picked.has(b.upload_id))
   const pickers = [...new Set(uploads.map(u => u.picker).filter(Boolean))]
+  const [pickFor, setPickFor] = useState(null)       // { title, subtitle, ids } — the pick list open
+  const [subsFor, setSubsFor] = useState(null)       // batch ids — recording a substitute
+  // Labels of the day by stage, for the flow at the top
+  const flow = batches.reduce((f, b) => {
+    const st = statOf(b)
+    if (!b.printed_at) f.toPrint += st.ready
+    else f.printed += st.ready - st.packed
+    f.ready += st.packed
+    f.gone += st.dispatched
+    f.total += st.ready + st.dispatched
+    return f
+  }, { toPrint: 0, printed: 0, ready: 0, gone: 0, total: 0 })
+  const waitingIds = batches.filter(b => statOf(b).ready > 0).map(b => b.id)
+  // The batch belongs to whoever printed it (they pick, pack and send it); before that, whoever it was uploaded for
+  const responsibleFor = (f) => {
+    const printedBy = f.groups.filter(g => g.printed_at && g.printed_by_name)
+      .sort((a, b) => String(b.printed_at).localeCompare(String(a.printed_at)))[0]?.printed_by_name
+    return printedBy || f.upload.picker || ''
+  }
 
   return (
     <div>
       <PageHeader
         eyebrow="Warehouse / dispatch"
         title="Dispatch"
-        description="Upload the day's labels from HELM. They're sorted into batches by what goes in each parcel, stamped, and ready to print."
-        meta={`${isToday ? 'Today' : dayOf(date)} · ${plural(files.length, 'batch')} · ${plural(sumLabels(batches), 'label')}${heldOrders ? ` · ${heldOrders} on hold` : ''}`}
+        description="From HELM to the van: what's coming in, what to pick, print, pack and send."
         actions={
           <>
-            {batches.length > 0 && (
-              <button className="btn btn-secondary btn-sm" onClick={collectionSheet} title="Parcels per carrier with a space for the driver to sign">
-                <Icon name="printer" size={14} /> Collection sheet
-              </button>
-            )}
-            {batches.length > 0 && (
-              <button className="btn btn-secondary btn-sm" onClick={exportDay} title="Every label for this day — who printed and dispatched each one">
-                <Icon name="download" size={14} /> Export day
-              </button>
-            )}
-            {closable.length > 0 && (
-              <button className="btn btn-secondary btn-sm" onClick={() => setClosing({ groups: closable, mode: 'dispatch', dayClose: true })}
-                title="Mark everything printed as dispatched, except any labels left over">
-                <Icon name="check" size={14} /> Close {isToday ? 'today' : 'day'}
+            {waitingIds.length > 0 && (
+              <button className="btn btn-secondary btn-sm" onClick={() => setPickFor({ title: `Pick list · ${isToday ? 'today' : dayOf(date)}`, subtitle: `Everything still to go — ${plural(files.filter(f => f.groups.some(g => statOf(g).ready > 0)).length, 'batch')}`, ids: waitingIds })}>
+                <Icon name="list" size={14} /> Pick list
               </button>
             )}
             <button className="btn btn-primary btn-sm" onClick={() => setUploading(true)}>
               <Icon name="upload" size={14} /> Upload labels
             </button>
+            {(batches.length > 0 || closable.length > 0) && (
+              <MoreMenu items={[
+                closable.length > 0 && { label: `Close ${isToday ? 'today' : 'the day'}`, hint: 'Everything printed goes, except labels left over', icon: 'check', run: () => setClosing({ groups: closable, mode: 'dispatch', dayClose: true }) },
+                batches.length > 0 && { label: 'Collection sheet', hint: 'Parcels per carrier, for the driver to sign', icon: 'printer', run: collectionSheet },
+                batches.length > 0 && { label: 'Export day', hint: 'Every label, who printed and dispatched it', icon: 'download', run: exportDay },
+              ].filter(Boolean)} />
+            )}
           </>
         }
       />
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 mb-4 [&>*:first-child]:col-span-2 sm:[&>*:first-child]:col-span-1">
-        <Metric label="To print" value={toPrint.length ? plural(new Set(toPrint.map(b => b.upload_id)).size, 'batch') : 'Nothing'} sub={toPrint.length ? plural(sumLabels(toPrint), 'label') : 'all printed'}
-          tone={toPrint.length ? 'text-royal-600' : ''} onClick={toPrint.length ? () => { setTab('batches'); setStatus('toprint') } : undefined} />
-        <Metric label="Printed" value={plural(sumLabels(printed), 'label')} sub={`${plural(files.filter(f => f.groups.every(g => g.printed_at)).length, 'batch')} fully printed`}
-          onClick={printed.length ? () => { setTab('batches'); setStatus('printed') } : undefined} />
-        <Metric label={isToday ? 'Dispatched today' : `Dispatched ${dayOf(date)}`} value={`${dayDispatched} of ${sumLabels(batches)}`}
-          sub={ready ? `${ready} ready for collection` : closable.length ? 'printed, not dispatched yet' : sumLabels(batches) ? 'labels' : 'nothing yet'}
-          tone={sumLabels(batches) && dayDispatched === sumLabels(batches) ? 'text-gain' : ''}
-          onClick={closable.length ? () => setClosing({ groups: closable, mode: 'dispatch', dayClose: true }) : undefined} />
-        <Metric label="Delayed" value={delayed.length} tone={delayed.length ? 'text-loss' : ''}
-          sub={delayed.length ? `not gone by ${cutoff}` : `everything out by ${cutoff}`} onClick={delayed.length ? () => setTab('delayed') : undefined} />
-        <Metric label="On hold" value={heldOrders} tone={heldOrders ? 'text-loss' : ''}
-          sub={heldOrders ? 'need a look before printing' : 'nothing waiting'} onClick={heldOrders ? () => setTab('held') : undefined} />
+      {/* The day: which one, how long to the cut-off, and anything that needs a look */}
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="inline-flex items-center bg-white border border-rule rounded-[6px]">
+          <button className="icon-btn" aria-label="Day before" onClick={() => { setDate(addDays(date, -1)); setPicked(new Set()) }}><Icon name="chevronLeft" size={16} /></button>
+          <label className="relative px-1 text-sm font-semibold text-ink cursor-pointer tabular-nums">
+            {isToday ? `Today · ${dayOf(date)}` : dayOf(date)}
+            <input type="date" className="absolute inset-0 opacity-0 cursor-pointer" value={date} aria-label="Dispatch date"
+              onChange={e => { setDate(e.target.value || today); setPicked(new Set()) }} />
+          </label>
+          <button className="icon-btn" aria-label="Next day" onClick={() => { setDate(addDays(date, 1)); setPicked(new Set()) }}><Icon name="chevronRight" size={16} /></button>
+        </div>
+        {!isToday && <button className="btn btn-ghost btn-sm" onClick={() => setDate(today)}>Back to today</button>}
+        {isToday && stillToGo > 0 && (
+          <span className={`pill ${minsLeft <= 0 ? 'pill-alert' : minsLeft <= 60 ? 'pill-alert' : 'pill-brand'}`}>
+            <Icon name="clock" size={12} />
+            {minsLeft > 0 ? `${minsLeft >= 60 ? `${Math.floor(minsLeft / 60)}h ${minsLeft % 60}m` : `${minsLeft}m`} to the ${cutoff} cut-off` : `Past the ${cutoff} cut-off`}
+            {' · '}{plural(stillToGo, 'label')} to go
+          </span>
+        )}
+        {delayed.length > 0 && <button className="pill pill-alert" onClick={() => setTab('delayed')}><Icon name="alert" size={12} /> {delayed.length} delayed</button>}
+        {heldOrders > 0 && <button className="pill pill-alert" onClick={() => setTab('held')}><Icon name="alert" size={12} /> {heldOrders} on hold</button>}
+        {isToday && upcoming.length > 0 && [...new Set(upcoming.map(b => b.ship_date))].sort().map(d => (
+          <button key={d} className="pill pill-quiet" onClick={() => setDate(d)} title="Already uploaded — not on today's list">
+            {dayOf(d)}: {plural(upcoming.filter(b => b.ship_date === d).reduce((s, b) => s + b.label_count, 0), 'label')}
+          </button>
+        ))}
       </div>
+
+      <FlowBar stages={[
+        { id: 'toprint', label: 'To print', value: flow.toPrint, color: 'bg-ink/20', dot: 'bg-ink/30', onClick: flow.toPrint ? () => { setTab('batches'); setStatus(s => (s === 'toprint' ? '' : 'toprint')) } : null, active: status === 'toprint' },
+        { id: 'printed', label: 'Picking & packing', value: flow.printed, color: 'bg-royal-300', dot: 'bg-royal-300', onClick: flow.printed ? () => { setTab('batches'); setStatus(s => (s === 'printed' ? '' : 'printed')) } : null, active: status === 'printed' },
+        { id: 'ready', label: 'Ready for dispatch', value: flow.ready, color: 'bg-royal-500', dot: 'bg-royal-500', onClick: closable.length ? () => setClosing({ groups: closable, mode: 'dispatch', dayClose: true }) : null, hint: flow.ready ? 'tap to dispatch' : null },
+        { id: 'gone', label: 'Dispatched', value: flow.gone, color: 'bg-lime', dot: 'bg-gain' },
+      ]} total={flow.total} />
 
       {jobs.length > 0 && (
         <div className="space-y-2 mb-4">
@@ -370,8 +406,8 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
         </div>
       )}
 
-      <NewOrdersCard me={me} mappings={mappings} names={helmNames} focus={helmFocus} showToast={showToast} onLog={onLog} />
-
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_400px] gap-5 items-start">
+      <div className="min-w-0 xl:order-1 order-2">
       <Tabs value={tab} onChange={setTab} items={[
         { id: 'batches', label: 'Batches', count: files.length },
         { id: 'orders', label: 'Orders', count: dayOrders.totals.orders || null },
@@ -386,73 +422,51 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
         <>
           {tab === 'batches' && (
             <>
-              <div className="filter-bar mb-4">
-                <div className="flex items-center gap-1.5">
-                  <input type="date" className="input text-sm w-[150px]" value={date}
-                    onChange={e => { setDate(e.target.value || today); setPicked(new Set()) }} aria-label="Dispatch date" />
-                  {!isToday && <button className="btn btn-secondary btn-sm" onClick={() => setDate(today)}>Today</button>}
-                </div>
-                <SearchInput value={search} onChange={e => setSearch(e.target.value)} placeholder="Batch, product…" className="flex-1 min-w-[180px]" />
-                <select className="input text-sm sm:w-[170px]" value={carrier} onChange={e => setCarrier(e.target.value)} aria-label="Carrier">
-                  <option value="">All carriers</option>
-                  {carriers.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <select className="input text-sm sm:w-[140px]" value={status} onChange={e => setStatus(e.target.value)} aria-label="Print status">
-                  <option value="">All batches</option>
-                  <option value="toprint">To print</option>
-                  <option value="printed">Printed</option>
-                </select>
-                <div className="text-xs text-ink/45 sm:ml-auto">{shown.length} of {batches.length}</div>
-              </div>
-
-              {isToday && stillToGo > 0 && (
-                <div className={`text-sm mb-3 ${minsLeft <= 60 ? 'text-loss font-medium' : 'text-ink/65'}`}>
-                  {minsLeft > 0
-                    ? <>{minsLeft >= 60 ? `${Math.floor(minsLeft / 60)}h ${minsLeft % 60}m` : `${minsLeft}m`} to the {cutoff} cut-off — <b>{plural(stillToGo, 'label')}</b> still to go</>
-                    : <>Past the {cutoff} cut-off — <b>{plural(stillToGo, 'label')}</b> not dispatched</>}
-                </div>
-              )}
-              {isToday && upcoming.length > 0 && (
-                <div className="text-xs text-ink/60 mb-3">
-                  Already uploaded for later:{' '}
-                  {[...new Set(upcoming.map(b => b.ship_date))].sort().map(d => (
-                    <button key={d} className="link-chip mr-1.5" onClick={() => setDate(d)}>
-                      {dayOf(d)} · {plural(upcoming.filter(b => b.ship_date === d).reduce((s, b) => s + b.label_count, 0), 'label')}
+              {files.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 mb-3">
+                  <SearchInput value={search} onChange={e => setSearch(e.target.value)} placeholder="Batch, product, person…" className="flex-1 min-w-[180px]" />
+                  {carriers.length > 1 && (
+                    <select className="input text-sm w-auto" value={carrier} onChange={e => setCarrier(e.target.value)} aria-label="Carrier">
+                      <option value="">All carriers</option>
+                      {carriers.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  )}
+                  {status && (
+                    <button className="filter-chip" onClick={() => setStatus('')}>
+                      {status === 'toprint' ? 'To print' : 'Printed'} <Icon name="close" size={12} />
                     </button>
-                  ))}
-                  <span className="text-ink/40">— not on today's list</span>
+                  )}
                 </div>
               )}
               {!isToday && date > today && (
-                <div className="card mb-4 border-royal-200 bg-royal-50 text-sm text-ink">
-                  These are for <b>{dayOf(date)}</b> — not today's dispatch list. They can be printed and packed early; they only count as late after {dayOf(date)}'s {cutoff} cut-off.
+                <div className="surface-sky px-4 py-3 mb-3 text-sm text-royal-800">
+                  These are for <b>{dayOf(date)}</b> — not today's list. They can be printed and packed early; they only count as late after {dayOf(date)}'s {cutoff} cut-off.
                 </div>
               )}
-              {toPrint.length > 0 && picked.size === 0 && (
-                <div className="card mb-4 border-royal-200 bg-royal-50 flex items-center justify-between gap-3 flex-wrap">
-                  <div className="text-sm text-ink">
-                    <b>{plural(sumLabels(toPrint), 'label')}</b> waiting to print across {plural(new Set(toPrint.map(b => b.upload_id)).size, 'batch')}
-                    <span className="text-ink/55"> — each batch starts with its pick list, then each product with its cover</span>
-                  </div>
-                  <button className="btn btn-primary btn-sm" disabled={!!printing} onClick={() => askPrint(toPrint)}>
-                    <Icon name="printer" size={14} /> {printing && printing.length > 1 ? 'Building…' : 'Print all'}
-                  </button>
-                </div>
-              )}
-              {picked.size > 0 && (
-                <div className="card mb-4 border-royal-200 bg-royal-50 flex items-center justify-between gap-3 flex-wrap">
-                  <div className="text-sm text-ink">
-                    <b>{plural(picked.size, 'batch')}</b> selected · {plural(sumLabels(pickedList), 'label')}
-                    <button className="link-chip ml-2" onClick={() => setPicked(new Set())}>Clear selection</button>
-                  </div>
-                  <div className="flex gap-2">
-                    <button className="btn btn-secondary btn-sm" disabled={!!printing} onClick={() => doPrint(pickedList, { download: true })}>
-                      <Icon name="download" size={14} /> Download
-                    </button>
-                    <button className="btn btn-primary btn-sm" disabled={!!printing} onClick={() => askPrint(pickedList)}>
-                      <Icon name="printer" size={14} /> Print selected
-                    </button>
-                  </div>
+              {(toPrint.length > 0 || picked.size > 0) && (
+                <div className="surface-sky px-4 py-3 mb-3 flex items-center justify-between gap-3 flex-wrap">
+                  {picked.size > 0 ? (
+                    <>
+                      <div className="text-sm text-ink">
+                        <b>{plural(picked.size, 'batch')}</b> selected · {plural(sumLabels(pickedList), 'label')}
+                        <button className="link-chip ml-2" onClick={() => setPicked(new Set())}>Clear</button>
+                      </div>
+                      <div className="flex gap-2">
+                        <button className="btn btn-secondary btn-sm" disabled={!!printing} onClick={() => doPrint(pickedList, { download: true })}><Icon name="download" size={14} /> Download</button>
+                        <button className="btn btn-primary btn-sm" disabled={!!printing} onClick={() => askPrint(pickedList)}><Icon name="printer" size={14} /> Print selected</button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-sm text-ink">
+                        <b>{plural(sumLabels(toPrint), 'label')}</b> to print across {plural(new Set(toPrint.map(b => b.upload_id)).size, 'batch')}
+                        <span className="hidden sm:inline text-ink/55"> — each batch starts with its pick list</span>
+                      </div>
+                      <button className="btn btn-primary btn-sm" disabled={!!printing} onClick={() => askPrint(toPrint)}>
+                        <Icon name="printer" size={14} /> {printing && printing.length > 1 ? 'Building…' : 'Print all'}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -464,17 +478,22 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <label className="flex items-center gap-2 text-xs text-ink/50 px-1 cursor-pointer w-fit">
-                    <input type="checkbox" className="w-4 h-4 accent-royal-500" checked={allShownPicked}
-                      onChange={() => setPicked(allShownPicked ? new Set() : new Set(shownFiles.map(f => f.id)))} />
-                    Select all batches
-                  </label>
+                  {shownFiles.length > 1 && (
+                    <label className="hidden sm:flex items-center gap-2 text-xs text-ink/50 px-1 cursor-pointer w-fit">
+                      <input type="checkbox" className="w-4 h-4 accent-royal-500" checked={allShownPicked}
+                        onChange={() => setPicked(allShownPicked ? new Set() : new Set(shownFiles.map(f => f.id)))} />
+                      Select all batches
+                    </label>
+                  )}
                   {shownFiles.map(f => (
-                    <FileCard key={f.id} file={f} stats={stats} statOf={statOf} picked={picked.has(f.id)} printing={printing}
+                    <BatchCard key={f.id} file={f} statOf={statOf} picked={picked.has(f.id)} printing={printing}
                       onPick={() => setPicked(s => { const n = new Set(s); n.has(f.id) ? n.delete(f.id) : n.add(f.id); return n })}
                       onPrintBatch={() => askPrint(f.groups)} onPrintGroup={(g) => askPrint([g])} onOpenGroup={setOpenBatch}
                       onDispatch={(list) => setClosing({ groups: list || f.groups.filter(g => g.printed_at && statOf(g).ready > 0), mode: 'dispatch' })}
-                      onPack={(list) => setClosing({ groups: packable(list || f.groups), mode: 'pack' })} />
+                      onPack={(list) => setClosing({ groups: packable(list || f.groups), mode: 'pack' })}
+                      onPickList={() => setPickFor({ title: `Pick list · Batch ${f.code}`, subtitle: [responsibleFor(f) && `${responsibleFor(f)}'s batch`, f.upload.title, dayOf(f.upload.ship_date || date)].filter(Boolean).join(' · '), ids: f.groups.map(g => g.id) })}
+                      onSubstitute={() => setSubsFor(f.groups.map(g => g.id))}
+                      responsible={responsibleFor(f)} />
                   ))}
                   {shownFiles.length === 0 && <div className="surface px-4 py-10 text-center text-sm text-ink/45">Nothing matches those filters.</div>}
                 </div>
@@ -510,6 +529,13 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
           )}
         </>
       )}
+      </div>
+
+      {/* What's still coming from HELM: beside the work on a wide screen, above it on a phone */}
+      <div className="min-w-0 order-1 xl:order-2 xl:sticky xl:top-6">
+        <NewOrdersCard me={me} mappings={mappings} names={helmNames} focus={helmFocus} showToast={showToast} onLog={onLog} />
+      </div>
+      </div>
 
       {uploading && (
         <UploadFlow me={me} job={typeof uploading === 'object' ? uploading : null} mappings={mappings} pickers={pickers} cutoff={cutoff}
@@ -530,11 +556,21 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
           onPrint={(b) => askPrint([b])} onDownload={(b) => doPrint([b], { download: true })}
           stat={statOf(batches.find(b => b.id === openBatch.id) || openBatch)}
           onDispatch={(b) => setClosing({ groups: [b], mode: 'dispatch' })}
-          onPack={(b) => setClosing({ groups: [b], mode: 'pack' })} />
+          onPack={(b) => setClosing({ groups: [b], mode: 'pack' })}
+          onSubstitute={(b) => setSubsFor([b.id])}
+          onPickList={(b) => setPickFor({ title: `Pick list · ${b.code} · ${b.label_name}`, subtitle: b.printed_by_name ? `${b.printed_by_name}'s batch` : '', ids: [b.id] })} />
+      )}
+
+      {pickFor && (
+        <PickList title={pickFor.title} subtitle={pickFor.subtitle} batchIds={pickFor.ids} people={people} me={me} showToast={showToast}
+          onClose={() => setPickFor(null)} />
+      )}
+      {subsFor && (
+        <SubstituteFlow batchIds={subsFor} people={people} me={me} showToast={showToast} onClose={() => setSubsFor(null)} onDone={changed} />
       )}
 
       {closing && (
-        <CloseDay batches={closing.groups} mode={closing.mode} stats={stats} me={me} single={closing.groups.length === 1} dayClose={!!closing.dayClose}
+        <CloseDay batches={closing.groups} mode={closing.mode} stats={stats} me={me} people={people} single={closing.groups.length === 1} dayClose={!!closing.dayClose}
           dayLabel={isToday ? 'today' : dayOf(date)} showToast={showToast} onLog={onLog}
           onClose={() => setClosing(null)} onDone={() => { setClosing(null); changed() }} />
       )}
@@ -596,7 +632,7 @@ function Metric({ label, value, sub, tone = '', onClick }) {
 
 // ── One batch ────────────────────────────────────────────────────────────────
 
-function BatchDrawer({ batch, highlight, printing, stat, onClose, onPrint, onDownload, onDispatch, onPack }) {
+function BatchDrawer({ batch, highlight, printing, stat, onClose, onPrint, onDownload, onDispatch, onPack, onSubstitute, onPickList }) {
   const [labels, setLabels] = useState(null)
   const [q, setQ] = useState('')
   useEffect(() => { loadBatchLabels(batch.id).then(setLabels).catch(() => setLabels([])) }, [batch.id, batch.printed_at])
@@ -615,7 +651,15 @@ function BatchDrawer({ batch, highlight, printing, stat, onClose, onPrint, onDow
             {stat?.packed > 0 && <div>{stat.packed} of {batch.label_count} ready for dispatch</div>}
             {stat?.dispatched > 0 && <div>{stat.dispatched} of {batch.label_count} dispatched</div>}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
+            {stat?.ready > 0 && onPickList && (
+              <button className="btn btn-secondary btn-sm" onClick={() => onPickList(batch)}><Icon name="list" size={14} /> Pick list</button>
+            )}
+            {onSubstitute && (
+              <button className="btn btn-secondary btn-sm" onClick={() => onSubstitute(batch)} title="Something else went instead — before or after dispatch">
+                <Icon name="swap" size={14} /> Substitute
+              </button>
+            )}
             {batch.printed_at && stat && stat.ready - stat.packed > 0 && (
               <button className="btn btn-secondary btn-sm" onClick={() => onPack(batch)}><Icon name="layers" size={14} /> Ready for dispatch</button>
             )}
@@ -1569,10 +1613,11 @@ function LabelStatus({ label }) {
  * hands — each stamped with its number. So they type those numbers and the
  * rest are marked dispatched in one go.
  */
-function CloseDay({ batches, mode = 'dispatch', stats, me, single, dayClose = false, dayLabel, showToast, onLog, onClose, onDone }) {
+function CloseDay({ batches, mode = 'dispatch', stats, me, people = [], single, dayClose = false, dayLabel, showToast, onLog, onClose, onDone }) {
   const pack = mode === 'pack'
   const [left, setLeft] = useState({})            // batch id → "10-25, 31"
   const [busy, setBusy] = useState(false)
+  const [answered, setAnswered] = useState(false) // every short product said what went
   const parsed = batches.map(b => {
     const r = parseRanges(left[b.id], b.label_count)
     const st = stats.get(b.id) || { ready: b.label_count, packed: 0, dispatched: 0 }
@@ -1609,6 +1654,7 @@ function CloseDay({ batches, mode = 'dispatch', stats, me, single, dayClose = fa
       description={pack
         ? 'Packed and labelled, waiting for collection — everything printed, except any labels not packed yet.'
         : 'Everything printed is marked dispatched, except any labels left over.'}>
+      <ShortCheck batchIds={batches.map(b => b.id)} people={people} me={me} showToast={showToast} onReady={setAnswered} />
       <div className="text-xs text-ink/55 mb-3">
         {pack ? 'Any not packed yet? ' : 'Got labels left over? '}Type the numbers stamped on them — e.g. <b>10-25, 31</b>. Leave it empty if {pack ? "they're all packed" : 'everything went'}.
       </div>
@@ -1624,7 +1670,7 @@ function CloseDay({ batches, mode = 'dispatch', stats, me, single, dayClose = fa
               {p.errors.map(e => <div key={e} className="text-xs text-loss mt-0.5">{e}</div>)}
               {p.set.size > 0 && !p.errors.length && <div className="text-xs text-ink/55 mt-0.5">{p.set.size} left over: {compressRanges([...p.set])}</div>}
             </div>
-            <input className="input text-sm w-[150px]" placeholder={pack ? 'Not packed' : 'Left over'} value={left[p.b.id] || ''} aria-label={`Labels left over in ${p.b.code}`}
+            <input className="input text-sm w-[120px] sm:w-[150px]" inputMode="numeric" placeholder={pack ? 'Not packed' : 'Left over'} value={left[p.b.id] || ''} aria-label={`Labels left over in ${p.b.code}`}
               onChange={e => setLeft(s => ({ ...s, [p.b.id]: e.target.value }))} />
           </div>
         ))}
@@ -1634,8 +1680,9 @@ function CloseDay({ batches, mode = 'dispatch', stats, me, single, dayClose = fa
       </div>
       <div className="flex gap-2">
         <button className="btn btn-secondary flex-1" onClick={onClose} disabled={busy}>Cancel</button>
-        <button className="btn btn-primary flex-1" disabled={busy || errors.length > 0 || goingNow === 0} onClick={confirm}>
-          {busy ? 'Marking…' : `Mark ${plural(goingNow, 'label')} ${pack ? 'ready' : 'dispatched'}`}
+        <button className="btn btn-primary flex-1" disabled={busy || errors.length > 0 || goingNow === 0 || !answered} onClick={confirm}
+          title={!answered ? 'Say what went for the short products first' : undefined}>
+          {busy ? 'Marking…' : !answered ? 'Answer the short items first' : `Mark ${plural(goingNow, 'label')} ${pack ? 'ready' : 'dispatched'}`}
         </button>
       </div>
     </Modal>
@@ -1914,93 +1961,182 @@ function ReprintModal({ label, me, people = [], showToast, onLog, onReprint, onC
 
 // ── One batch: one uploaded file, split into its products ────────────────────
 
-function FileCard({ file, statOf, picked, printing, onPick, onPrintBatch, onPrintGroup, onOpenGroup, onDispatch, onPack }) {
-  const [open, setOpen] = useState(true)
+function BatchCard({ file, statOf, picked, printing, responsible, onPick, onPrintBatch, onPrintGroup, onOpenGroup, onDispatch, onPack, onPickList, onSubstitute }) {
   const g = file.groups
-  const labels = g.reduce((s, x) => s + x.label_count, 0)
+  const [open, setOpen] = useState(g.length <= 12)
+  const tally = g.reduce((t, x) => {
+    const st = statOf(x)
+    if (!x.printed_at) t.toPrint += st.ready
+    else t.printed += st.ready - st.packed
+    t.ready += st.packed; t.gone += st.dispatched; t.total += st.ready + st.dispatched
+    return t
+  }, { toPrint: 0, printed: 0, ready: 0, gone: 0, total: 0 })
   const orders = g.reduce((s, x) => s + x.order_count, 0)
   const printedAll = g.every(x => x.printed_at)
   const printedSome = g.some(x => x.printed_at)
-  const gone = g.reduce((s, x) => s + statOf(x).dispatched, 0)
-  const waiting = g.reduce((s, x) => s + statOf(x).ready, 0)
-  const packed = g.reduce((s, x) => s + statOf(x).packed, 0)
-  const unpacked = g.filter(x => x.printed_at).reduce((s, x) => s + statOf(x).ready - statOf(x).packed, 0)
-  const lastPrint = g.filter(x => x.printed_at).sort((a, b) => String(b.printed_at).localeCompare(String(a.printed_at)))[0]
+  const waiting = tally.toPrint + tally.printed + tally.ready
+  const unpacked = tally.printed
   const busy = printing && g.some(x => printing.includes(x.id))
-  const carriers = [...new Set(g.map(x => `${x.carrier} ${x.service}`.trim()))]
+  const carriers = [...new Set(g.map(x => x.carrier).filter(Boolean))]
+  const lastPrint = g.filter(x => x.printed_at).sort((a, b) => String(b.printed_at).localeCompare(String(a.printed_at)))[0]
+  const doneAll = tally.total > 0 && tally.gone === tally.total
 
-  const status = gone > 0 && waiting === 0 ? <StatusBadge tone="live" dot>Dispatched</StatusBadge>
-    : gone > 0 ? <StatusBadge tone="alert" dot>{gone} of {labels} gone</StatusBadge>
-    : packed > 0 && packed === waiting ? <StatusBadge tone="live">Ready for dispatch</StatusBadge>
-    : packed > 0 ? <StatusBadge tone="brand" dot>{packed} of {labels} ready</StatusBadge>
-    : printedAll ? <StatusBadge tone="brand" dot>Printed</StatusBadge>
-    : printedSome ? <StatusBadge tone="brand" dot>Part printed</StatusBadge>
-    : <StatusBadge tone="quiet" dot>To print</StatusBadge>
+  // One obvious next step for the batch, the rest alongside
+  const next = !printedAll
+    ? { label: busy ? 'Building…' : printedSome ? 'Print the rest' : 'Print batch', icon: 'printer', run: onPrintBatch, disabled: !!printing }
+    : unpacked > 0 ? { label: 'Ready for dispatch', icon: 'layers', run: () => onPack() }
+      : waiting > 0 ? { label: 'Mark dispatched', icon: 'check', run: () => onDispatch() }
+        : null
 
   return (
-    <div className={`card p-0 overflow-hidden ${picked ? 'ring-2 ring-royal-300' : ''}`}>
-      <div className="flex items-center gap-3 px-4 py-3.5 flex-wrap">
-        <input type="checkbox" className="w-4 h-4 accent-royal-500" checked={picked} onChange={onPick} aria-label={`Select batch ${file.code}`} />
-        <button className="min-w-0 flex-1 text-left" onClick={() => setOpen(o => !o)}>
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-lg font-semibold text-ink tabular-nums">{file.code}</span>
-            {file.upload.picker && <span className="text-sm text-ink">· {file.upload.picker}</span>}
-            {file.upload.title && <span className="text-sm text-ink/55">· {file.upload.title}</span>}
+    <div className={`card p-0 overflow-hidden ${picked ? 'ring-2 ring-royal-300' : ''} ${doneAll ? 'opacity-80' : ''}`}>
+      <div className="px-4 pt-3.5 pb-3">
+        <div className="flex items-start gap-3">
+          <input type="checkbox" className="hidden sm:block w-4 h-4 mt-2 accent-royal-500" checked={picked} onChange={onPick} aria-label={`Select batch ${file.code}`} />
+          <button className="shrink-0 min-w-[52px] h-11 px-2 rounded-[6px] bg-sky/70 text-royal-700 text-lg font-semibold tabular-nums" onClick={() => setOpen(o => !o)}
+            aria-expanded={open} title={open ? 'Hide products' : 'Show products'}>{file.code}</button>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              {responsible ? (
+                <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink">
+                  <span className="w-6 h-6 rounded-full bg-royal-500 text-white text-[11px] flex items-center justify-center">{responsible.charAt(0).toUpperCase()}</span>
+                  {responsible}
+                </span>
+              ) : <span className="text-sm text-ink/45">Nobody yet</span>}
+              {file.upload.title && <span className="text-sm text-ink/55 truncate">· {file.upload.title}</span>}
+            </div>
+            <div className="text-xs text-ink/50 mt-0.5">
+              {plural(tally.total, 'label')} · {plural(orders, 'order')} · {plural(g.length, 'product')}{carriers.length ? ` · ${carriers.join(', ')}` : ''}
+              {lastPrint ? ` · printed ${timeOf(lastPrint.printed_at)}` : file.upload.created_at ? ` · uploaded ${timeOf(file.upload.created_at)}` : ''}
+            </div>
           </div>
-          <div className="text-xs text-ink/50 mt-0.5">
-            {plural(labels, 'label')} · {plural(orders, 'order')} · {plural(g.length, 'product')} · {carriers.join(', ')}
-            {file.upload.created_at && <> · uploaded {timeOf(file.upload.created_at)}{file.upload.uploaded_by_name ? ` by ${file.upload.uploaded_by_name}` : ''}</>}
-            {lastPrint && <> · printed {timeOf(lastPrint.printed_at)}{lastPrint.printed_by_name ? ` by ${lastPrint.printed_by_name}` : ''}</>}
+          <div className="shrink-0 text-right">
+            {doneAll ? <StatusBadge tone="live" dot>Dispatched</StatusBadge>
+              : <div className="text-sm font-semibold tabular-nums text-ink">{tally.gone}<span className="text-ink/40 font-normal">/{tally.total}</span></div>}
+            {!doneAll && <div className="text-[10px] uppercase tracking-wide text-ink/40">gone</div>}
           </div>
-        </button>
-        {status}
-        <div className="flex gap-2">
-          {unpacked > 0 && (
-            <button className="btn btn-secondary btn-sm" onClick={() => onPack()} title="Packed and labelled — waiting for collection">
-              <Icon name="layers" size={14} /> Ready for dispatch
+        </div>
+        <BatchBar counts={tally} total={tally.total} />
+        <div className="flex flex-wrap gap-2 mt-3">
+          {next && (
+            <button className="btn btn-primary btn-sm flex-1 sm:flex-none justify-center py-2.5 sm:py-2" disabled={next.disabled} onClick={next.run}>
+              <Icon name={next.icon} size={14} /> {next.label}
             </button>
           )}
-          {printedSome && waiting > 0 && (
-            <button className={`btn btn-sm ${unpacked === 0 ? 'btn-primary' : 'btn-secondary'}`} onClick={() => onDispatch()}><Icon name="check" size={14} /> Mark dispatched</button>
+          {waiting > 0 && (
+            <button className="btn btn-secondary btn-sm flex-1 sm:flex-none justify-center py-2.5 sm:py-2" onClick={onPickList}><Icon name="list" size={14} /> Pick list</button>
           )}
-          <button className={`btn btn-sm ${printedAll ? 'btn-secondary' : 'btn-primary'}`} disabled={!!printing} onClick={onPrintBatch}>
-            <Icon name="printer" size={14} /> {busy ? 'Building…' : printedAll ? 'Print again' : 'Print batch'}
-          </button>
+          {next && next.label === 'Ready for dispatch' && waiting > 0 && (
+            <button className="btn btn-secondary btn-sm justify-center py-2.5 sm:py-2" onClick={() => onDispatch()}><Icon name="check" size={14} /> Dispatched</button>
+          )}
+          <MoreMenu items={[
+            { label: 'Substitute…', hint: 'Something else went instead', icon: 'swap', run: onSubstitute },
+            printedAll && { label: busy ? 'Building…' : 'Print again', icon: 'printer', run: onPrintBatch },
+          ].filter(Boolean)} />
         </div>
       </div>
       {open && (
-        <table className="w-full text-sm border-t border-rule">
-          <tbody>
-            {g.map(x => {
-              const st = statOf(x)
-              return (
-                <tr key={x.id} className="border-b border-rule last:border-0 hover:bg-sky/20 cursor-pointer" onClick={() => onOpenGroup(x)}>
-                  <td className="pl-11 pr-3 py-2.5">
-                    <div className="font-medium text-ink">{x.label_name}</div>
-                    {x.contents && x.contents.toUpperCase() !== x.label_name.toUpperCase() && <div className="text-xs text-ink/45">{x.contents}</div>}
-                  </td>
-                  <td className="px-3 py-2.5 text-ink/65 whitespace-nowrap">{x.carrier} <span className="text-ink/45">{x.service}</span></td>
-                  <td className="px-3 py-2.5 text-right tabular-nums whitespace-nowrap">
-                    <b>{x.label_count}</b> <span className="text-xs text-ink/45">label{x.label_count !== 1 ? 's' : ''}</span>
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap"><BatchStatus batch={x} stat={st} /></td>
-                  <td className="px-4 py-2.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                    {x.printed_at && st.ready - st.packed > 0 && (
-                      <button className="btn btn-secondary btn-xs mr-1.5" onClick={() => onPack([x])} title="This product is packed — waiting for collection">Ready</button>
-                    )}
-                    {x.printed_at && st.ready > 0 && st.ready === st.packed && (
-                      <button className="btn btn-secondary btn-xs mr-1.5" onClick={() => onDispatch([x])}>Dispatched</button>
-                    )}
-                    <button className="btn btn-secondary btn-xs" disabled={!!printing} onClick={() => onPrintGroup(x)}
-                      title="Print just this product, with its cover page">
-                      <Icon name="printer" size={13} /> {printing?.includes(x.id) && printing.length === 1 ? '…' : 'Print'}
+        <ul className="border-t border-rule divide-y divide-rule/70">
+          {g.map(x => {
+            const st = statOf(x)
+            return (
+              <li key={x.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-sky/20 cursor-pointer" onClick={() => onOpenGroup(x)}>
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-ink leading-snug">{x.label_name}</div>
+                  <div className="text-xs text-ink/45 mt-0.5">
+                    {x.contents && x.contents.toUpperCase() !== x.label_name.toUpperCase() ? `${x.contents} · ` : ''}{x.carrier} {x.service}
+                  </div>
+                  <div className="mt-1 sm:hidden"><BatchStatus batch={x} stat={st} /></div>
+                </div>
+                <div className="hidden sm:block shrink-0 w-[150px]"><BatchStatus batch={x} stat={st} /></div>
+                <div className="shrink-0 text-right tabular-nums w-10">
+                  <div className="text-base font-semibold text-ink leading-none">{x.label_count}</div>
+                  <div className="text-[10px] text-ink/40">label{x.label_count !== 1 ? 's' : ''}</div>
+                </div>
+                <div className="shrink-0 flex gap-1.5" onClick={e => e.stopPropagation()}>
+                  {x.printed_at && st.ready - st.packed > 0 && (
+                    <button className="btn btn-secondary btn-xs" onClick={() => onPack([x])} title="This product is packed — waiting for collection">Ready</button>
+                  )}
+                  {x.printed_at && st.ready > 0 && st.ready === st.packed && (
+                    <button className="btn btn-secondary btn-xs" onClick={() => onDispatch([x])}>Sent</button>
+                  )}
+                  {!x.printed_at && (
+                    <button className="btn btn-secondary btn-xs" disabled={!!printing} onClick={() => onPrintGroup(x)} title="Print just this product, with its cover page">
+                      <Icon name="printer" size={13} /><span className="hidden sm:inline">{printing?.includes(x.id) && printing.length === 1 ? '…' : 'Print'}</span>
                     </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                  )}
+                </div>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+/** One bar for a set of labels: to print, picking & packing, ready, gone. */
+function BatchBar({ counts, total, className = 'mt-3' }) {
+  if (!total) return null
+  const seg = [['toPrint', 'bg-ink/15'], ['printed', 'bg-royal-300'], ['ready', 'bg-royal-500'], ['gone', 'bg-lime']]
+  return (
+    <div className={`flex h-2 rounded-full overflow-hidden bg-ink/5 ${className}`} aria-hidden="true">
+      {seg.map(([k, c]) => counts[k] > 0 && <div key={k} className={c} style={{ width: `${(counts[k] / total) * 100}%` }} />)}
+    </div>
+  )
+}
+
+/** The day's labels from printing to the van, as one picture. Each stage opens what's in it. */
+function FlowBar({ stages, total }) {
+  return (
+    <section className="card p-0 mb-4 overflow-hidden" aria-label="Today's labels by stage">
+      <div className="flex h-2.5 bg-ink/5">
+        {total > 0 && stages.map(s => s.value > 0 && <div key={s.id} className={s.color} style={{ width: `${(s.value / total) * 100}%` }} />)}
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-rule/70">
+        {stages.map((s, i) => {
+          const Tag = s.onClick ? 'button' : 'div'
+          return (
+            <Tag key={s.id} onClick={s.onClick || undefined}
+              className={`text-left px-3.5 py-3 ${i >= 2 ? 'border-t border-rule/70 sm:border-t-0' : ''} ${s.onClick ? 'hover:bg-sky/25 transition-colors' : ''} ${s.active ? 'bg-sky/40' : ''}`}>
+              <div className="flex items-center gap-1.5 text-[11px] font-medium text-ink/55"><span className={`w-2 h-2 rounded-full ${s.dot}`} />{s.label}</div>
+              <div className="text-2xl font-semibold tabular-nums text-ink leading-tight mt-0.5">{s.value}</div>
+              <div className="text-[11px] text-ink/40">{s.hint || (total ? `${Math.round((s.value / total) * 100)}% of ${total}` : 'labels')}</div>
+            </Tag>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+/** The less-used actions, tucked behind "…" so the main one stands out. */
+function MoreMenu({ items = [] }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const off = (e) => { if (!ref.current?.contains(e.target)) setOpen(false) }
+    const esc = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('pointerdown', off); document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('pointerdown', off); document.removeEventListener('keydown', esc) }
+  }, [open])
+  if (!items.length) return null
+  return (
+    <div className="relative" ref={ref}>
+      <button className="btn btn-secondary btn-sm px-2.5 h-full" aria-label="More" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(o => !o)}>
+        <Icon name="more" size={16} />
+      </button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-full mt-1 z-30 w-64 bg-white border border-rule rounded-[6px] shadow-lift py-1">
+          {items.map(it => (
+            <button key={it.label} role="menuitem" className="w-full flex items-start gap-2.5 px-3 py-2.5 text-left hover:bg-sky/30"
+              onClick={() => { setOpen(false); it.run?.() }}>
+              {it.icon && <Icon name={it.icon} size={15} className="mt-0.5 text-ink/50 shrink-0" />}
+              <span><span className="block text-sm text-ink">{it.label}</span>{it.hint && <span className="block text-[11px] text-ink/45">{it.hint}</span>}</span>
+            </button>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -2203,13 +2339,14 @@ function DispatchDashboard({ me, cutoff, showToast, people = [] }) {
   const [to, setTo] = useState(londonDate())
   const [labels, setLabels] = useState(null)
   const [units, setUnits] = useState([])
+  const [subs, setSubs] = useState([])
   const [editing, setEditing] = useState(false)
 
   const load = useCallback(async () => {
     setLabels(null)
     try {
-      const [l, u] = await Promise.all([loadDashboardLabels({ from, to }), loadItemUnits()])
-      setLabels(l); setUnits(u)
+      const [l, u, sb] = await Promise.all([loadDashboardLabels({ from, to }), loadItemUnits(), loadSubstitutes({ from, to }).catch(() => [])])
+      setLabels(l); setUnits(u); setSubs(sb)
     } catch (e) { showToast?.(`Couldn't load the dashboard — ${e?.message || 'try again'}`, 'error'); setLabels([]) }
   }, [from, to]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { load() }, [load])
@@ -2219,6 +2356,17 @@ function DispatchDashboard({ me, cutoff, showToast, people = [] }) {
   const everyone = useMemo(() => (labels ? summariseDispatch(labels, unitsByCode, { cutoff }) : null), [labels, unitsByCode, cutoff])
   const names = [...new Set([...people, ...(everyone?.people || []).map(p => p.name)])].filter(n => n && n !== 'Not recorded')
   const pick = (id, n) => { setRange(id); setFrom(daysAgo(n())); setTo(londonDate()) }
+  // Substitutes: what ran out and what went instead, most often first
+  const subsShown = person ? subs.filter(x => x.by_name === person) : subs
+  const subPairs = useMemo(() => {
+    const m = new Map()
+    for (const x of subsShown) {
+      const k = `${x.product_id}|${x.sub_product_id}`
+      if (!m.has(k)) m.set(k, { k, from: x.product_name, to: x.sub_name, orders: 0, units: 0, by: new Set() })
+      const r = m.get(k); r.orders++; r.units += Number(x.units) || 0; if (x.by_name) r.by.add(x.by_name)
+    }
+    return [...m.values()].sort((a, b) => b.orders - a.orders)
+  }, [subsShown])
 
   return (
     <div className="space-y-4">
@@ -2243,13 +2391,15 @@ function DispatchDashboard({ me, cutoff, showToast, people = [] }) {
         <div className="surface"><EmptyState icon="printer" title="Nothing dispatched in these dates" sub="Pick a wider range, or upload a batch." /></div>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 xl:grid-cols-7 gap-3">
             <Metric label="Orders" value={sum.orders} sub={plural(sum.parcels, 'parcel')} />
             <Metric label="Units dispatched" value={sum.unitsGone} sub={sum.unitsWaiting ? `${sum.unitsWaiting} still to go` : 'all gone'} tone="text-royal-600" />
             <Metric label="Replacements" value={sum.replacements} sub={plural(sum.replacementUnits, 'unit')} tone={sum.replacements ? 'text-loss' : ''} />
             <Metric label="On time" value={sum.onTimePct == null ? '—' : `${sum.onTimePct}%`} sub={`gone by ${cutoff}`}
               tone={sum.onTimePct == null ? '' : sum.onTimePct >= 95 ? 'text-gain' : sum.onTimePct < 80 ? 'text-loss' : ''} />
             <Metric label="Reprints" value={sum.reprints} sub="labels printed again" />
+            <Metric label="Substitutes" value={subsShown.length} sub={subsShown.length ? `${Math.round((subsShown.length / Math.max(1, sum.orders)) * 1000) / 10}% of orders` : 'none sent'}
+              tone={subsShown.length ? 'text-warn' : ''} />
             <Metric label="Carriers" value={sum.carriers.map(c => `${c.name} ${c.n}`).join(' · ') || '—'} sub="parcels" />
           </div>
 
@@ -2335,6 +2485,30 @@ function DispatchDashboard({ me, cutoff, showToast, people = [] }) {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {subPairs.length > 0 && (
+            <div className="card p-0 overflow-hidden">
+              <div className="px-4 py-3 border-b border-rule">
+                <div className="text-sm font-semibold text-ink">Substitutes sent</div>
+                <div className="text-xs text-ink/50">Ran out, and something else went instead. Stock came off the product that went.</div>
+              </div>
+              <ul className="divide-y divide-rule/70">
+                {subPairs.map(r => (
+                  <li key={r.k} className="px-4 py-2.5 flex items-start gap-3">
+                    <div className="min-w-0 flex-1 text-sm">
+                      <div className="text-ink/55 leading-snug">{r.from}</div>
+                      <div className="text-ink font-medium leading-snug flex items-start gap-1.5"><Icon name="arrowRight" size={13} className="mt-1 shrink-0 text-ink/35" />{r.to}</div>
+                      {r.by.size > 0 && <div className="text-[11px] text-ink/40 mt-0.5">by {[...r.by].join(', ')}</div>}
+                    </div>
+                    <div className="text-right shrink-0 tabular-nums">
+                      <div className="text-sm font-semibold text-ink">{plural(r.orders, 'order')}</div>
+                      <div className="text-[11px] text-ink/45">{plural(r.units, 'unit')} sent</div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

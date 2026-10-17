@@ -3,6 +3,30 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.31.0 — 18 Oct 2026
+- Dispatch redesigned. The day at the top (‹ day ›, time to the cut-off, delayed and on-hold
+  flags), then one bar for every label from To print → Picking & packing → Ready → Dispatched; tap a
+  stage to see it. Each batch is a card with whose batch it is (whoever printed it, otherwise who it
+  was uploaded for), its own progress bar and one button for the next step (Print → Ready for
+  dispatch → Mark dispatched). Pick list and Substitute sit beside it; the rest is under "…".
+  New Orders sits beside the batches on a wide screen and above them on a phone
+- Pick list (phones first): for one batch or everything still to go today. Each line shows the shelf to
+  go to, how many, and from where after that (pick shelf first, then overflow), in aisle order.
+  Tap a line when it's in the tote; ticks stay on that phone. Shows anything short, any substitutes
+  already recorded, and item codes not linked in HELM
+- Substitutes: "Sent something else" from the pick list, the batch, at Ready for dispatch, at
+  dispatch, or after it's gone. Pick what went (closest matches first), how many for each one
+  ordered, which orders and who. The substitute's stock comes off instead of the ordered product's
+  (put right straight away if it's already gone). Ready for dispatch and Mark dispatched now ask
+  about anything short on the shelves: "Sent as ordered" or "Something else". The Dispatch dashboard
+  counts substitutes and lists what was swapped for what, and by whom
+- New Orders: "Past ship-by" is its own section. The office can clear them all at once (orders already
+  shipped another way, e.g. Amazon labels from the old portal), clear one at a time, or clear labelled
+  orders over a day old. Unlinked item codes say "not linked in HELM — fix the link in HELM"
+- Shelf counts are planned Monday to Saturday only
+- Database: migrations 032 (indexes; counts Mon–Sat) and 033 (dispatch_substitutes, pick list,
+  substitutes at despatch), applied 18 Oct
+
 ## v2.30.2 — 17 Oct 2026
 - Tasks: "Selling, but no pick shelf" lists products that are selling or on open orders but have all
   their stock in overflow. Top-up tasks need a pick shelf to fill, so these were never raised (White
@@ -15,7 +39,7 @@ Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
   with "Show more" (all 221 products made a very long page)
 - Dispatch on phones: smaller summary boxes, so New Orders is higher up the screen. "0 batchs" now reads "0 batches"
 - The phone top bar is a fixed height
-- Database (not applied yet): supabase/migrations/031_lock_internal_functions.sql stops signed-out
+- Database (applied 17 Oct): supabase/migrations/031_lock_internal_functions.sql stops signed-out
   visitors calling stock functions directly (inv_take, inv_despatch_order, inv_undo_despatch,
   inv_ensure_location, inv_open_order_units and others) with the public key
 
