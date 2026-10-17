@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { PageHeader, Icon, StatusBadge, SegmentedControl, EmptyState, Modal } from './UI'
 import { StockChange, WhoSelect, useWho, CountShelf } from './InventoryParts'
-import { fmtUnits } from '../lib/inventory'
+import { fmtUnits, needsPickShelf } from '../lib/inventory'
 import { invDismissTask } from '../lib/db'
 
 const when = (d) => (d ? new Date(d).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
@@ -29,6 +29,9 @@ export default function WarehouseTasksPage({ me, inventory, people = [], office 
   const done = tasks.filter(t => t.status !== 'open')
   const shown = view === 'open' ? open : done
   const doingProduct = doing && products.find(p => p.id === doing.product_id)
+  // Top-up tasks need a pick shelf to fill, so anything selling without one is listed on its own
+  const noPick = products.filter(needsPickShelf)
+    .sort((a, b) => (b.open_orders - a.open_orders) || (b.daily - a.daily) || a.name.localeCompare(b.name))
 
   return (
     <div>
@@ -43,6 +46,28 @@ export default function WarehouseTasksPage({ me, inventory, people = [], office 
         <SegmentedControl label="Show" value={view} onChange={setView}
           items={[{ id: 'open', label: 'To do', count: open.length }, { id: 'done', label: 'Done lately', count: done.length }]} />
       </div>
+
+      {view === 'open' && noPick.length > 0 && (
+        <div className="panel-notice mb-3">
+          <div className="text-sm font-semibold text-ink">Selling, but no pick shelf ({noPick.length})</div>
+          <div className="text-xs text-ink/55 mt-0.5 mb-2">All the stock is in overflow, so these never get a top-up task. Give each one a pick shelf.</div>
+          <div className="divide-y divide-rule/70">
+            {noPick.map(p => (
+              <button key={p.id} className="w-full flex items-center justify-between gap-3 py-2.5 text-left hover:bg-paper/70"
+                onClick={() => onNavigate?.('inventory', p.id)}>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-ink leading-snug">{p.name}</span>
+                  <span className="block text-xs text-ink/50 tabular-nums">
+                    {fmtUnits(p.on_hand)} in {(p.locations || []).map(l => l.code).join(', ') || 'no shelf'}
+                    {p.open_orders > 0 ? ` · ${fmtUnits(p.open_orders)} on open orders` : ''}
+                  </span>
+                </span>
+                <Icon name="arrowRight" size={14} className="text-ink/30 shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {shown.length === 0 ? (
         <EmptyState icon="check" title={view === 'open' ? 'Nothing to top up' : 'Nothing done in the last few days'}

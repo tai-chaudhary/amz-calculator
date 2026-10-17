@@ -41,7 +41,7 @@ import {
   loadGoodsIn, bookInDelivery, logUnexpectedDelivery, updateDelivery, uploadGoodsInPhoto, goodsInPhotoUrl,
   loadInventory,
 } from './lib/db'
-import { stockState, needsRestock } from './lib/inventory'
+import { stockState, needsRestock, needsPickShelf } from './lib/inventory'
 
 
 // Each page is its own download, fetched the first time it's opened (and
@@ -2020,7 +2020,7 @@ export default function App() {
     if (id === 'archive') return archivedCount
     if (id === 'dispatch') return dispatchIndex.batches.filter(b => !b.printed_at && b.ship_date === todayLondon).length
     if (id === 'requests') return canAccess(me, 'purchases') ? stockRequests.filter(r => requestState(r).needsOffice).length : 0
-    if (id === 'tasks') return (inventory?.tasks || []).filter(t => t.status === 'open').length
+    if (id === 'tasks') return (inventory?.tasks || []).filter(t => t.status === 'open').length + (inventory?.products || []).filter(needsPickShelf).length
     if (id === 'inventory') return restockList.filter(p => ['out', 'low'].includes(p.st.state)).length
     if (id === 'goods-in') {
       if (canAccess(me, 'purchases')) return goodsIn.deliveries.filter(deliveryNeedsOffice).length
@@ -2115,7 +2115,7 @@ export default function App() {
       {/* Main */}
       <main className="flex-1 flex flex-col min-w-0">
         {/* Top bar (mobile) */}
-        <div className="lg:hidden flex items-center gap-3 px-4 py-3 bg-white border-b border-rule sticky top-0 z-10">
+        <div className="lg:hidden flex items-center gap-3 px-4 h-14 bg-white border-b border-rule sticky top-0 z-10">
           <button onClick={() => setSidebarOpen(true)} className="icon-btn -ml-1" aria-label="Open menu" aria-expanded={sidebarOpen}><Icon name="menu" size={20} /></button>
           <span className="font-semibold text-ink flex-1 truncate">{pageLabel(page)}</span>
           <button className="icon-btn -mr-1" aria-label="Search" onClick={() => { setCommandQuery(''); setCommandOpen(true) }}><Icon name="search" size={18} /></button>

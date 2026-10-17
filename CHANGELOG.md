@@ -3,6 +3,22 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.30.2 — 17 Oct 2026
+- Tasks: "Selling, but no pick shelf" lists products that are selling or on open orders but have all
+  their stock in overflow. Top-up tasks need a pick shelf to fill, so these were never raised (White
+  De-Icing Rock Salt: 1,150 in A-10-0-1, ~22 a day). Tap one to give it a pick shelf. Counted in the
+  Tasks number in the menu
+- New Orders: "N not in inventory" badge when HELM sends item codes Inventory doesn't know. There's
+  no stock check and nothing held for those, and it used to show only as grey text on the line
+- New Orders: clearing an order or changing the cut-off is logged under the person's name, not their email
+- Inventory on phones: the search box stays at the top while scrolling, and the list shows 40 at a time
+  with "Show more" (all 221 products made a very long page)
+- Dispatch on phones: smaller summary boxes, so New Orders is higher up the screen. "0 batchs" now reads "0 batches"
+- The phone top bar is a fixed height
+- Database (not applied yet): supabase/migrations/031_lock_internal_functions.sql stops signed-out
+  visitors calling stock functions directly (inv_take, inv_despatch_order, inv_undo_despatch,
+  inv_ensure_location, inv_open_order_units and others) with the public key
+
 ## v2.30.1 — 17 Oct 2026
 - Faster to open: each page now downloads the first time it's used (and quietly in the background
   after sign-in), instead of the whole portal up front. The first download is about a quarter of

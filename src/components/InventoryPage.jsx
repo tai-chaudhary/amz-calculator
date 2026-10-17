@@ -45,6 +45,10 @@ export default function InventoryPage({ me, inventory, people = [], focusId, off
   const [counting, setCounting] = useState(null)  // shelf code
   const [damageKey, setDamageKey] = useState(0)
   const [asking, setAsking] = useState(null)      // stock request prefill
+  // Phones show the list a page at a time: hundreds of cards make it slow to scroll and easy to lose your place
+  const PAGE = 40
+  const [limit, setLimit] = useState(PAGE)
+  useEffect(() => { setLimit(PAGE) }, [search, filter, sort])
 
   useEffect(() => {
     onRefresh?.()
@@ -127,8 +131,10 @@ export default function InventoryPage({ me, inventory, people = [], focusId, off
             <MetricCard label="Pick shelves to top up" value={openTasks} color={openTasks ? 'text-warn' : 'text-ink'} sub="tasks for the warehouse" onClick={() => onNavigate?.('tasks')} />
           </div>
 
-          <div className="flex gap-3 flex-wrap items-center justify-between mb-3">
-            <SearchInput value={search} onChange={e => setSearch(e.target.value)} placeholder="Product, code or shelf" className="w-full sm:w-80" autoFocus={false} />
+          {/* Stays in view on phones while scrolling the list, under the top bar */}
+          <div className="flex gap-3 flex-wrap items-center justify-between mb-3 sticky top-14 lg:static z-[5] -mx-4 px-4 sm:-mx-7 sm:px-7 py-2 lg:mx-0 lg:px-0 lg:py-0 bg-paper/95 backdrop-blur-sm lg:bg-transparent lg:backdrop-blur-none">
+            <SearchInput value={search} onChange={e => setSearch(e.target.value)} placeholder="Product, code or shelf" className="w-full sm:w-80" autoFocus={false}
+              type="search" enterKeyHint="search" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Search stock" />
             <div className="flex gap-2 items-center">
               <label className="text-xs text-ink/50" htmlFor="inv-sort">Sort</label>
               <select id="inv-sort" className="input py-1.5 text-sm w-auto" value={sort} onChange={e => setSort(e.target.value)}>
@@ -161,7 +167,12 @@ export default function InventoryPage({ me, inventory, people = [], focusId, off
             <>
               {/* Phones: a card each */}
               <div className="space-y-2 md:hidden">
-                {shown.map(p => <ProductCard key={p.id} p={p} office={office} onOpen={() => setOpenId(p.id)} />)}
+                {shown.slice(0, limit).map(p => <ProductCard key={p.id} p={p} office={office} onOpen={() => setOpenId(p.id)} />)}
+                {shown.length > limit && (
+                  <button className="btn btn-secondary w-full justify-center py-3" onClick={() => setLimit(l => l + PAGE)}>
+                    Show {Math.min(PAGE, shown.length - limit)} more · {fmtUnits(shown.length - limit)} not shown
+                  </button>
+                )}
               </div>
               {/* Wider: a table */}
               <div className="hidden md:block table-shell overflow-x-auto">

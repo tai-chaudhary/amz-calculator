@@ -32,7 +32,7 @@ let lastPerson = ''
 
 const timeOf = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '')
 const dayOf = (d) => (d ? new Date(`${String(d).slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '')
-const plural = (n, word) => `${n} ${word}${n !== 1 ? 's' : ''}`
+const plural = (n, word) => `${n} ${word}${n !== 1 ? (/(s|x|ch|sh)$/.test(word) ? 'es' : 's') : ''}`
 const itemsText = (items = []) => items.map(i => `${i.qty === '*' ? 'Any qty' : i.qty} × ${decode(i.name || i.code)}`).join(', ')
 
 /**
@@ -349,7 +349,7 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
         }
       />
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3 mb-4 [&>*:first-child]:col-span-2 sm:[&>*:first-child]:col-span-1">
         <Metric label="To print" value={toPrint.length ? plural(new Set(toPrint.map(b => b.upload_id)).size, 'batch') : 'Nothing'} sub={toPrint.length ? plural(sumLabels(toPrint), 'label') : 'all printed'}
           tone={toPrint.length ? 'text-royal-600' : ''} onClick={toPrint.length ? () => { setTab('batches'); setStatus('toprint') } : undefined} />
         <Metric label="Printed" value={plural(sumLabels(printed), 'label')} sub={`${plural(files.filter(f => f.groups.every(g => g.printed_at)).length, 'batch')} fully printed`}
@@ -586,10 +586,10 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
 function Metric({ label, value, sub, tone = '', onClick }) {
   const Tag = onClick ? 'button' : 'div'
   return (
-    <Tag className={`metric-card text-left ${onClick ? 'hover:border-royal-300 transition-colors' : ''}`} onClick={onClick}>
+    <Tag className={`metric-card text-left px-3 py-2.5 sm:px-4 sm:py-3.5 ${onClick ? 'hover:border-royal-300 transition-colors' : ''}`} onClick={onClick}>
       <div className="metric-label">{label}</div>
-      <div className={`metric-value text-xl ${tone}`}>{value}</div>
-      {sub && <div className="text-xs text-ink/45 mt-0.5">{sub}</div>}
+      <div className={`metric-value text-lg sm:text-xl ${tone}`}>{value}</div>
+      {sub && <div className="text-[11px] sm:text-xs text-ink/45 mt-0.5 leading-snug">{sub}</div>}
     </Tag>
   )
 }

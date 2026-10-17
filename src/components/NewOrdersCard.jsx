@@ -114,11 +114,13 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
   const oldestLabel = labelled.reduce((m, o) => (!m || Date.parse(o.labelled_at) < Date.parse(m) ? o.labelled_at : m), null)
   const labelLate = labelled.length > 0 && minsSince(oldestLabel, now) > 30
   const shortCount = [...check.values()].filter(c => c.level === 'short').length
+  // Item codes HELM sends that inventory doesn't know: no stock check and nothing held for them
+  const missingCount = [...check.values()].filter(c => c.level === 'missing').length
 
   const saveCutoffs = async () => {
     try {
       const clean = Object.fromEntries(Object.entries(cutEdit).filter(([, v]) => v))
-      await setHelmCutoffs(clean, me?.display_name || me?.email)
+      await setHelmCutoffs(clean, me?.name || me?.email)
       onLog?.({ entity_type: 'dispatch', entity_name: 'Order cut-off', action: 'Changed', detail: Object.entries(clean).map(([k, v]) => `${k === 'default' ? 'Mon–Fri' : k === 'saturday' ? 'Saturday' : k} ${v}`).join(', '), source: 'dispatch' })
       setCutEdit(null); showToast?.('Cut-off saved'); load()
     } catch (e) { showToast?.(e?.message || 'Couldn’t save', 'error') }
@@ -127,7 +129,7 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
   const clear = async (o) => {
     if (!window.confirm(`Clear ${o.ref || o.order_number}? It stops counting as an open order and won't be shown here again.`)) return
     try {
-      await clearHelmOrder(o.id, me?.display_name || me?.email)
+      await clearHelmOrder(o.id, me?.name || me?.email)
       onLog?.({ entity_type: 'dispatch', entity_name: o.ref || o.order_number, action: 'Cleared HELM order',
         detail: `${o.order_number || ''} — won't come through Dispatch, no longer counted as an open order`, source: 'dispatch' })
       showToast?.('Cleared'); load()
@@ -193,6 +195,11 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
           </span>
         )}
         {shortCount > 0 && <span className="badge badge-red">{plural(shortCount, 'product')} short</span>}
+        {missingCount > 0 && (
+          <span className="badge badge-amber" title="These item codes aren't in Inventory, so there's no stock check and no stock held for them">
+            {missingCount} not in inventory
+          </span>
+        )}
         {labelled.length > 0 && <span className={`badge ${labelLate ? 'badge-amber' : 'badge-blue'}`}>{labelled.length} labelled, awaiting upload</span>}
         <span className={`ml-auto text-xs ${stale ? 'text-loss font-medium' : 'text-ink/40'}`}>
           {!data ? (error ? '' : 'loading…') : stale ? `HELM not read for ${ago(sync.last_ok, now) || 'a while'}` : `updated ${ago(sync.last_ok, now)}${ago(sync.last_ok, now) === 'just now' ? '' : ' ago'}`}
@@ -300,11 +307,11 @@ function StockFlag({ c, more = 0, named = false }) {
     ? `${who}short — need ${fmt(c.need)}, ${fmt(c.free)} in stock`
     : c.level === 'topup'
       ? `${who}top up the pick shelf — need ${fmt(c.need)}, ${fmt(c.pickFree)} on it`
-      : `${named ? `${c.code}: ` : ''}not in inventory`
-  const tone = c.level === 'short' ? 'text-loss' : c.level === 'topup' ? 'text-warn' : 'text-ink/45'
+      : `${named ? `${c.code}: ` : ''}not in inventory — no stock check`
+  const tone = c.level === 'short' ? 'text-loss' : 'text-warn'
   return (
     <span className={`block text-xs mt-0.5 ${tone}`}>
-      {c.level !== 'missing' && <Icon name="alert" size={11} className="inline -mt-0.5 mr-1" />}
+      <Icon name="alert" size={11} className="inline -mt-0.5 mr-1" />
       {text}{more > 0 ? ` (+${more} more)` : ''}
     </span>
   )

@@ -416,3 +416,8 @@ export function requestPrefill(p) {
       : `From stock: ${fmtUnits(p.available)} available`,
   }
 }
+
+/** On the shelves and selling (or on open orders), but none of it is on a pick shelf */
+export const needsPickShelf = (p) => p.active !== false && p.on_hand > 0
+  && (Number(p.daily) > 0 || p.open_orders > 0)
+  && !(p.locations || []).some(l => l.pickable && l.qty > 0)
