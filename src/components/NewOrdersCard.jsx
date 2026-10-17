@@ -324,7 +324,8 @@ const RANK = ['short', 'missing', 'topup']
 const shortDay = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
 
 // "3 X 151 CHALKY FURNITURE PAINT 400ML" → 3 and "151 Chalky Furniture Paint 400ml".
-// Short all-capital words without vowels (PVA, DHL) stay as they are.
+// Abbreviations (PVA, DHL, LED…) and short words without vowels stay in capitals.
+const ACRONYMS = new Set(['PVA', 'PVC', 'DHL', 'UK', 'XL', 'XXL', 'LED', 'USB', 'UV', 'MDF', 'DIY', 'A4', 'A3', 'A5', 'HD', 'BBQ', 'UPVC', 'WD40'])
 function splitStamp(stamp) {
   const m = String(stamp).match(/^\s*(\d+)\s*[X×]\s+(.*)$/i)
   const qty = m ? Number(m[1]) : 1
@@ -332,7 +333,7 @@ function splitStamp(stamp) {
     if (!/[A-Z]/.test(w) || /[a-z]/.test(w)) return w
     if (/^[\d.]+L$/.test(w)) return w                                   // 5L stays 5L
     if (/^[\d.]+[A-Z]+$/.test(w)) return w.toLowerCase()            // 400ML → 400ml, 25KG → 25kg
-    if (w.length <= 4 && !/[AEIOU]/.test(w)) return w                  // PVA, DHL, XL
+    if (ACRONYMS.has(w.replace(/[^A-Z0-9]/g, '')) || (w.length <= 4 && !/[AEIOUY]/.test(w))) return w   // PVA, DHL, XL
     return w.charAt(0) + w.slice(1).toLowerCase()
   }).join('')
   return { qty, name }
