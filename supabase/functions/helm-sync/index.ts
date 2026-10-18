@@ -186,6 +186,14 @@ async function addTracking(orders: any[], info: any, maxLookups: number) {
       }
     }
   }
+  // Once: the layout of HELM's recent shipments and of a labelled order (field names
+  // only), to see where tracking numbers live and how a shipment points at its order
+  if (!info.probed) {
+    info.probed = new Date().toISOString()
+    try { info.shapes = { ...(info.shapes || {}), 'shipments (latest)': shapeOf(await helm('/shipments', { per_page: 3 })) } }
+    catch (e) { info.shapes = { ...(info.shapes || {}), 'shipments (latest)': [String((e as Error)?.message || e).slice(0, 160)] } }
+    if (orders[0]) info.shapes = { ...(info.shapes || {}), 'labelled order': shapeOf(orders[0]) }
+  }
   info.empty = empty
   info.paths = paths; info.ways = tried; info.lookups = lookups
   info.with_tracking = orders.filter(o => o.__tracking.length).length
