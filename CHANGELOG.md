@@ -3,6 +3,30 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.36.0 — 18 Oct 2026
+- Every packing-slip code is now one of our inventory products, with the right quantity. A code is
+  our own SKU, or someone trusted to "Link item codes" has said once what it is: which product,
+  how many in one (a 2-pack with 2 on the slip is 4 units), and whether it's the same product or
+  something we send instead. Codes nobody has verified never take stock and never get a stamp
+- New permission in Team & Access, under "Trusted to": Link item codes. Admins always have it
+- Stamps aren't typed any more. They come from the product's name in Inventory (or its shorter
+  stamp name) and the units in each box: "4 X PYREX GLASS MEASURING JUG 500ML". Two products in
+  one box: "1 X A + 2 X B". If the units don't share evenly over the boxes, the order holds
+- Uploading labels: orders with a code nobody has verified go to On hold; everything else uploads
+  as normal. Whoever can link codes verifies them there (suggestions already filled in), and the
+  held orders go into the same batch they came from
+- Inventory → Item codes: codes on open orders still to verify, the ones we always send something
+  else for (so the listing can be fixed), every verified code (change or remove) and a history of
+  every change. Tasks shows the codes to verify to whoever can link them
+- "Sent instead of …" shows on the pick list and in each batch whenever a substitute goes out
+- New products added at Goods In by the warehouse show in Inventory as "Office to verify". Stock
+  goes on the shelf straight away; the office checks the name and gives it its SKU (and stamp
+  name) before it goes live. Orders for it wait until then. Tasks lists them for the office
+- Only the office changes a product's name or SKU. Changing a SKU carries its verified codes with it
+- SKUs show quietly under each product in Inventory, and you can search by SKU
+- Stock that fails to come off when a label is despatched is now logged and shown in Item codes,
+  instead of failing silently
+
 ## v2.35.0 — 18 Oct 2026
 - Phones: tabs along the bottom for the pages used all day: Dispatch, Tasks, Inventory and Goods in
   (or whichever four pages that person has), each with its count, plus Menu for everything else.
