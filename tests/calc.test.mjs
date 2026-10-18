@@ -1372,6 +1372,16 @@ test('courier totals and product patterns', () => {
     const [waiting] = checkOrders([{ slip: { channelRef: 'P1', items: [{ code: 'NEW-0001', qty: 1 }] }, labels: [{ pageIndex: 0, carrier: 'Evri', refs: ['P1'] }] }], [], { codeInfo: info })
     assert.equal(waiting.blocked, true)
     assert.match(waiting.problems.find(p => p.code === 'verify').text, /waiting for the office/)
+    // Weight comes from the slip shared over the boxes: a 2-pack of 12kg over 2 labels is 12kg a box, not 24
+    const PED = { code: 'PED-12KG', name: 'Pedigree 12kg', stamp: 'Pedigree 12kg', qty: 2 }
+    const pedInfo = new Map([[normRef('2xPED12'), { status: 'verified', kind: 'same', items: [PED] }]])
+    const [ped] = checkOrders([{ slip: { channelRef: 'W1', items: [{ code: '2xPED12', name: '2 x Pedigree 12kg', qty: 1 }] },
+      labels: [{ pageIndex: 0, carrier: 'Evri', refs: ['W1'] }, { pageIndex: 1, carrier: 'Evri', refs: ['W1'] }] }], [], { codeInfo: pedInfo })
+    assert.equal(ped.problems.filter(p => p.code === 'weight').length, 0)
+    // A code with nothing readable in it can't be verified: held as unreadable, not stuck waiting for a Verify that can't happen
+    const blank = autoMapping([{ code: '--', qty: 1 }], 1, info)
+    assert.equal(blank.unverified.length, 0)
+    assert.equal(blank.problem.code, 'no-items')
     // One verified, one not: still stopped
     assert.equal(autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 1 }, { code: 'NEVER-SEEN', qty: 1 }], 1, info).mapping, null)
     const odd = autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 3 }], 2, info)

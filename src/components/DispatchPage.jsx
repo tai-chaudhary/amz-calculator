@@ -1182,7 +1182,9 @@ function HeldList({ held, mappings, highlight, me, onChanged, showToast, onLog, 
       const needsCarrier = real.some(l => !l.carrier)
       const reason = String(o.first.hold_reason || '')
       // Reasons that only a person can clear: wrong reference, postcode, count, already uploaded
-      const needsCheck = /match|postcode|should have|already uploaded|different carriers|label says|isn't in helm|couldn't be/i.test(reason) && !/can't tell what's in each box/.test(reason)
+      // Each reason on its own: one about boxes doesn't excuse another about the label or a repeat upload
+      const needsCheck = reason.split(/;\s*/).some(part => /match|postcode|should have|already uploaded|different carriers|label says|isn't in helm|couldn't be|page order|no order reference/i.test(part)
+        && !/can't tell what's in each box/.test(part))
       const steps = {
         label: real.length > 0,
         codes: !!codeInfo,

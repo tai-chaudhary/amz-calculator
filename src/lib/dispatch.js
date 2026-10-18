@@ -428,10 +428,13 @@ export function pairPages(pages) {
  */
 export function autoMapping(items, labelCount, codeInfo) {
   const unverified = []
+  let unreadable = false
   const totals = new Map()
   const instead = new Set()
   for (const it of items) {
     const info = codeInfo.get(normRef(it.code))
+    // A code with nothing readable in it can't be verified: the order holds as unreadable instead
+    if (!normRef(it.code)) { unreadable = true; continue }
     if (!info || !['own', 'verified'].includes(info.status) || !(info.items || []).length) {
       unverified.push({ code: it.code, name: it.name, qty: it.qty, status: info?.status || 'unknown', suggest: info?.items || [],
         offer: Array.isArray(info?.suggest) && info.suggest.length ? { items: info.suggest, kind: info.suggest_kind || 'same', wanted: info.suggest_wanted || '' } : null })
@@ -446,6 +449,7 @@ export function autoMapping(items, labelCount, codeInfo) {
       totals.set(k, t)
     }
   }
+  if (unreadable) return { mapping: null, unverified: [], problem: { level: 'hold', code: 'no-items', text: 'Couldn\'t read an item code on the packing slip' } }
   if (unverified.length) return { mapping: null, unverified, problem: null }
   const products = [...totals.values()].filter(p => p.units > 0)
   if (!products.length) return { mapping: null, unverified: [], problem: null }
@@ -503,7 +507,7 @@ export function checkOrders(orders, mappings = [], { existing = [], helmCodes = 
           auto.unverified.some(u => u.status !== 'pending') && `Not verified yet: ${auto.unverified.filter(u => u.status !== 'pending').map(u => u.code).join(', ')} — someone with “Link item codes” confirms what it is first`,
           auto.unverified.some(u => u.status === 'pending') && `New product waiting for the office: ${auto.unverified.filter(u => u.status === 'pending').map(u => u.code).join(', ')} — approve it in Inventory`,
         ].filter(Boolean).join(' · ') })
-    } else if (auto && !mapping) problems.push({ level: 'hold', code: 'no-items', text: 'Nothing to send on the packing slip' })
+    } else if (auto && !mapping && !auto.problem) problems.push({ level: 'hold', code: 'no-items', text: 'Nothing to send on the packing slip' })
     else if (!mapping) problems.push({ level: 'map', code: 'unmapped', text: 'New item — set what goes in each parcel' })
     if (auto?.problem) problems.push(auto.problem)
 
@@ -524,9 +528,9 @@ export function checkOrders(orders, mappings = [], { existing = [], helmCodes = 
       const kgs = items.map(itemKg)
       if (kgs.every(k => k != null)) {
         const unitKg = items.length === 1 ? kgs[0] : null
-        const boxes = auto && mapping.stamps && unitKg != null
-          ? mapping.stamps.map(t => (parseInt(t, 10) || 1) * unitKg)
-          : anyQty && unitKg != null
+        // Stamps from inventory always share evenly (or the order holds), so each box is the slip's weight shared out.
+        // (A stamp counts our units, not the slip's packs, so it can't be multiplied by a pack's weight)
+        const boxes = !auto && anyQty && unitKg != null
           ? boxStamps(mapping, items, o.labels.length, { anyQty, manual: !!o.slip?.manual }).map(t => (parseInt(t, 10) || 1) * unitKg)
           : Array.from({ length: o.labels.length }, () => items.reduce((t, it, k) => t + kgs[k] * (parseInt(it.qty, 10) || 0), 0) / o.labels.length)
         const heaviest = Math.max(...boxes)

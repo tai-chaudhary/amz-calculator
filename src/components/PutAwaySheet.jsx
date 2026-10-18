@@ -53,7 +53,11 @@ export default function PutAwaySheet({ delivery, me, people = [], office, produc
       for (const l of lines) {
         if (l.skip) { out.push({ name: l.name, skip: true }); continue }
         let pid = l.product_id
-        if (!pid) pid = await invSaveProduct(null, { code: l.newProduct.code.trim(), name: l.newProduct.name.trim(), in_helm: false, stock_item_id: l.stock_item_id || '' }, who)
+        if (!pid) {
+          pid = await invSaveProduct(null, { code: l.newProduct.code.trim(), name: l.newProduct.name.trim(), in_helm: false, stock_item_id: l.stock_item_id || '' }, who)
+          // Kept on the line, so trying again after a failure doesn't add the product twice
+          setLines(ls => ls.map(x => (x === l ? { ...x, product_id: pid } : x)))
+        }
         for (const s of l.shelves) {
           out.push({ name: l.name, stock_item_id: l.stock_item_id, product_id: pid, location: cleanLocation(s.location),
             units: num(s.units), pickable: locations.some(x => x.code === cleanLocation(s.location)) ? null : s.pickable })

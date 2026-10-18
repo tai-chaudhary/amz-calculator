@@ -26,6 +26,14 @@ Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 - SKUs show quietly under each product in Inventory, and you can search by SKU
 - Stock that fails to come off when a label is despatched is now logged and shown in Item codes,
   instead of failing silently
+- Safety checks: a product can't be given a SKU that's already a linked packing-slip code or a HELM
+  pack code (it would quietly take over those orders). When a SKU changes, the old one keeps
+  working as a verified code for the new one. One link per code, however it's spelled
+- Held orders keep every reason they were held for, so one that also needs its label checked (or
+  was already uploaded) can't be released just because its codes were verified
+- The weight check for verified packs uses the slip's weight shared over the boxes (a 2-pack of
+  12kg over two labels is 12kg a box), so it no longer holds orders by mistake
+- Putting a delivery away: trying again after an error no longer adds the new product twice
 
 ## v2.35.0 — 18 Oct 2026
 - Phones: tabs along the bottom for the pages used all day: Dispatch, Tasks, Inventory and Goods in

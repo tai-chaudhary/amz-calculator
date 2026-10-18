@@ -74,7 +74,7 @@ async function run(id) {
       patch(id, { status: 'saving', read, existing, history })
       const { me, picker, title, onLog } = job.meta
       // Waiting in On hold, in this batch, saying exactly why (codes to verify, boxes to fill)
-      const held = plan.heldBack.map(o => ({ ...o, holdReason: o.problems.filter(p => p.level !== 'check').map(p => p.text).join('; ') || 'Held back at upload to check' }))
+      const held = plan.heldBack.map(o => ({ ...o, holdReason: o.problems.map(p => p.text).join('; ') || 'Held back at upload to check' }))
       const result = await saveDispatchUpload({
         file: job.file, bytes, pageCount: pages.length, batches: plan.batches, held, me, shipDate: job.meta.shipDate || londonDate(), picker, title,
       })

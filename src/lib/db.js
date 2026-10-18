@@ -937,7 +937,7 @@ export async function saveDispatchUpload({ file, bytes, pageCount, batches, held
       batch_id: saved[i].id, seq: l.seq, label_name: b.label_name, status: 'ready',
     }))))
     for (const o of held) {
-      const reason = o.holdReason || o.problems.filter(p => p.level !== 'check').map(p => p.text).join('; ') || 'Held back at upload'
+      const reason = o.holdReason || o.problems.map(p => p.text).join('; ') || 'Held back at upload'
       const labels = o.labels.length ? o.labels : [{ pageIndex: o.slip?.pageIndex ?? 0, noLabel: true }]
       labels.forEach(l => rows.push(rowFor(o, l, {
         status: 'held', hold_reason: reason, label_name: o.mapping?.label_name || null,
