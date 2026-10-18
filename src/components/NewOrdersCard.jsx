@@ -61,6 +61,16 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
   const [expanded, setExpanded] = useState(() => new Set())
   const [view, setView] = useState(null)        // which list is showing; null = the first with anything in it
   const [q, setQ] = useState('')
+  // Full screen on a laptop for going through a long list; Esc or the button puts it back
+  const [full, setFull] = useState(false)
+  useEffect(() => {
+    if (!full) return
+    const esc = (e) => e.key === 'Escape' && setFull(false)
+    const overflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('keydown', esc); document.body.style.overflow = overflow }
+  }, [full])
   const [now, setNow] = useState(Date.now())
   const focusRef = useRef(null)
 
@@ -184,10 +194,16 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
   }
 
   return (
-    <section className="card-flush mb-4 overflow-hidden flex flex-col xl:max-h-[calc(100dvh-3rem)]" aria-label="New orders from HELM">
+    <>
+    {full && <div className="fixed inset-0 z-40 bg-ink/35 backdrop-blur-[2px]" onClick={() => setFull(false)} aria-hidden="true" />}
+    <section className={full
+      ? 'fixed inset-3 sm:inset-6 lg:inset-x-[max(1.5rem,calc(50vw-40rem))] z-50 card-flush shadow-modal overflow-hidden flex flex-col'
+      : 'card-flush mb-4 overflow-hidden flex flex-col xl:max-h-[calc(100dvh-3rem)]'}
+      aria-label="New orders from HELM" role={full ? 'dialog' : undefined} aria-modal={full || undefined}>
       {/* Always in view: what's waiting and whether HELM is being read */}
       <div className="shrink-0 px-4 pt-3.5 pb-3 border-b border-rule">
-        <button className="w-full flex items-center gap-2 text-left" onClick={toggleOpen} aria-expanded={open}>
+        <div className="flex items-center gap-2">
+        <button className="flex-1 min-w-0 flex items-center gap-2 text-left" onClick={() => (full ? null : toggleOpen())} aria-expanded={open || full}>
           <span className="flex-1 min-w-0">
             <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-royal-500">New orders · HELM</span>
             <span className="block text-lg font-semibold text-ink tabular-nums leading-tight mt-0.5">
@@ -198,8 +214,15 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
             <span className={`w-1.5 h-1.5 rounded-full ${stale ? 'bg-coral' : 'bg-gain'}`} />
             {!data ? '' : stale ? `Not read for ${ago(sync.last_ok, now) || 'a while'}` : `Live · ${ago(sync.last_ok, now)}${ago(sync.last_ok, now) === 'just now' ? '' : ' ago'}`}
           </span>
-          <Icon name={open ? 'chevronDown' : 'chevronRight'} size={16} className="text-ink/40 shrink-0" />
+          {!full && <Icon name={open ? 'chevronDown' : 'chevronRight'} size={16} className="text-ink/40 shrink-0" />}
         </button>
+        {data && (
+          <button className={`icon-btn shrink-0 ${full ? '' : 'hidden lg:inline-flex'}`} onClick={() => { setFull(f => !f); setOpen(true) }}
+            aria-label={full ? 'Back to the side' : 'Full screen'} title={full ? 'Back to the side (Esc)' : 'Full screen'}>
+            <Icon name={full ? 'shrink' : 'expand'} size={16} />
+          </button>
+        )}
+        </div>
         {data && (late.length > 0 || shortCount > 0 || missingCount > 0 || (fresh.length > 0 && oldestHrs >= 24)) && (
           <div className="flex flex-wrap gap-1.5 mt-2">
             {late.length > 0 && <button className="pill pill-alert" onClick={() => { setOpen(true); setView('late') }}>{late.length} past ship-by</button>}
@@ -214,7 +237,7 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
         )}
       </div>
 
-      {open && (
+      {(open || full) && (
         <>
           {error && <div className="shrink-0 px-4 py-3 text-sm text-loss">{error}</div>}
           {stale && sync.last_error && office && (
@@ -263,13 +286,15 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
               )}
 
               {/* The list scrolls on its own on a wide screen, so the page stays put */}
-              <div className="xl:flex-1 xl:min-h-0 xl:overflow-y-auto overscroll-contain">
+              <div className={full ? `flex-1 min-h-0 overflow-y-auto overscroll-contain ${groups.length > 1 ? 'lg:overflow-hidden' : ''}` : 'xl:flex-1 xl:min-h-0 xl:overflow-y-auto overscroll-contain'}>
                 {!shownOrders.length ? (
                   <div className="px-4 py-8 text-center text-sm text-ink/50">
                     {words.length ? 'Nothing matches.' : current?.id === 'today' ? (laterDays.length ? 'Nothing for today — the rest ship on a later day.' : 'No new orders for today.') : 'Nothing here.'}
                   </div>
-                ) : groups.map(([carrier, list]) => (
-                  <div key={carrier || 'all'}>
+                ) : <div className={full && groups.length > 1 ? 'grid lg:grid-cols-2 lg:h-full lg:divide-x divide-rule' : ''}>
+                  {/* Full screen: couriers side by side, each scrolling on its own */}
+                  {groups.map(([carrier, list]) => (
+                  <div key={carrier || 'all'} className={full && groups.length > 1 ? 'min-w-0 lg:min-h-0 lg:overflow-y-auto overscroll-contain' : 'min-w-0'}>
                     {carrier && (
                       <div className="sticky top-0 z-[1] flex items-baseline justify-between px-4 py-1.5 bg-paper/95 backdrop-blur-sm border-b border-rule/70">
                         <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-royal-700">{carrier}</span>
@@ -288,6 +313,7 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
                     </ul>
                   </div>
                 ))}
+                </div>}
               </div>
 
               {office && (
@@ -317,6 +343,7 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
         </>
       )}
     </section>
+    </>
   )
 }
 

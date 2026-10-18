@@ -3,6 +3,12 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.31.2 — 18 Oct 2026
+- Fix: the "…" button on each batch opened an empty white box (the menu was cut off by the card's
+  edge). Its options are now buttons on the card: Substitute, and Print again once it's all printed
+- New Orders: full-screen button (top right, laptops and up). Opens it over the page with Evri and DHL
+  side by side, each scrolling on its own. Esc or the same button puts it back where it was
+
 ## v2.31.1 — 18 Oct 2026
 - New Orders rebuilt to be easier to read. One list at a time, chosen from tabs: Today, each later
   day (Mon 19 Oct…), Past ship-by, Labelled and Needs attention (office). Each line shows the quantity

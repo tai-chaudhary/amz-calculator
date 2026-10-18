@@ -2029,10 +2029,14 @@ function BatchCard({ file, statOf, picked, printing, responsible, onPick, onPrin
           {next && next.label === 'Ready for dispatch' && waiting > 0 && (
             <button className="btn btn-secondary btn-sm justify-center py-2.5 sm:py-2" onClick={() => onDispatch()}><Icon name="check" size={14} /> Dispatched</button>
           )}
-          <MoreMenu items={[
-            { label: 'Substitute…', hint: 'Something else went instead', icon: 'swap', run: onSubstitute },
-            printedAll && { label: busy ? 'Building…' : 'Print again', icon: 'printer', run: onPrintBatch },
-          ].filter(Boolean)} />
+          <button className="btn btn-secondary btn-sm justify-center py-2.5 sm:py-2" onClick={onSubstitute} title="Something else went instead — before or after dispatch">
+            <Icon name="swap" size={14} /> Substitute
+          </button>
+          {printedAll && (
+            <button className="btn btn-ghost btn-sm justify-center py-2.5 sm:py-2" disabled={!!printing} onClick={onPrintBatch} title="Print the whole batch again">
+              <Icon name="printer" size={14} /> {busy ? 'Building…' : 'Print again'}
+            </button>
+          )}
         </div>
       </div>
       {open && (

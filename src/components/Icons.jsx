@@ -23,6 +23,8 @@ const paths = {
   search: <><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></>,
   menu: <path d="M4 7h16M4 12h16M4 17h16"/>,
   close: <path d="m6 6 12 12M18 6 6 18"/>,
+  expand: <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/>,
+  shrink: <path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>,
   chevronDown: <path d="m7 10 5 5 5-5"/>,
   chevronRight: <path d="m9 6 6 6-6 6"/>,
   chevronLeft: <path d="m15 6-6 6 6 6"/>,
