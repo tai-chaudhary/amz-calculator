@@ -57,6 +57,21 @@ export const NAV_GROUPS = [
 
 export const NAV = NAV_GROUPS.flatMap(g => g.items)
 
+/**
+ * Things a person can be trusted to do, beyond the pages they open. Ticked
+ * per person in Team & Access, like a page; admins can always do them.
+ */
+export const CAPABILITIES = [
+  { id: 'link-codes', icon: 'swap', label: 'Link item codes',
+    description: 'Say what a packing-slip code is in our inventory. Every order with that code takes that stock and gets that stamp from then on, so only for people who know the products well.' },
+]
+export const isCapability = (id) => CAPABILITIES.some(c => c.id === id)
+/** Can this person do this (a capability, not a page)? */
+export function canDo(me, id) {
+  if (!me || me.active === false) return false
+  return me.role === 'admin' || (Array.isArray(me.permissions) && me.permissions.includes(id))
+}
+
 /** Nothing is open to everyone — access is whatever an admin has ticked. */
 export const ALWAYS_OPEN = []
 
@@ -127,6 +142,6 @@ export function landingPage(me) {
 
 /** Warehouse sections never show what anything costs; anyone with another section (or an admin) does. */
 // (public.sees_costs() in the database keeps the same list)
-export const WAREHOUSE_ONLY = ['dispatch', 'dispatch-dashboard', 'requests', 'goods-in', 'inventory', 'tasks', 'tracking']
+export const WAREHOUSE_ONLY = ['dispatch', 'dispatch-dashboard', 'requests', 'goods-in', 'inventory', 'tasks', 'tracking', 'link-codes']
 export const seesCosts = (me) => !!me && me.active !== false &&
   (me.role === 'admin' || (Array.isArray(me.permissions) && me.permissions.some(p => !WAREHOUSE_ONLY.includes(p))))

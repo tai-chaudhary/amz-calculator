@@ -1398,3 +1398,32 @@ export async function loadTrackingSync() {
   const { data } = await supabase.from('helm_tracking_sync').select('*').eq('id', 1).maybeSingle()
   return data || null
 }
+
+// ── Item codes: every slip code is one of our SKUs, or what a person verified it to be ──
+/** What each code is: Map(normRef(code) → { status: own|verified|unverified|unknown|broken, items, kind, wanted_name, … }) */
+export async function loadCodeInfo(codes) {
+  const list = [...new Set((codes || []).filter(Boolean).map(String))]
+  const out = new Map()
+  for (let i = 0; i < list.length; i += 500) {
+    const rows = await rpc('dispatch_code_info', { p_codes: list.slice(i, i + 500) })
+    for (const r of rows || []) out.set(normRef(r.code), r)
+  }
+  return out
+}
+/** Products a code can be linked to: SKU, name, shelves, stock. */
+export const loadLinkCandidates = () => rpc('inv_link_candidates')
+/** Every verified code. */
+export const loadCodeLinks = () => rpc('inv_code_links')
+export async function loadCodeLog(limit = 200) {
+  const { data, error } = await supabase.from('inv_code_log').select('*').order('at', { ascending: false }).limit(limit)
+  if (error) throw error
+  return data || []
+}
+/** Verify (or change) what a code is. items: [{ code: our SKU, qty }]; kind: 'same' | 'substitute' */
+export const linkCode = (code, name, items, kind, wanted, by) =>
+  rpc('inv_link_code', { p_code: code, p_name: name || null, p_items: items, p_kind: kind, p_wanted: wanted || null, p_by: by })
+export async function loadDespatchErrors() {
+  const { data, error } = await supabase.from('inv_despatch_errors').select('*').is('resolved_at', null).order('at', { ascending: false }).limit(100)
+  if (error) return []
+  return data || []
+}

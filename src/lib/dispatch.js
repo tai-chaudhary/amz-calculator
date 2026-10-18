@@ -418,11 +418,66 @@ export function pairPages(pages) {
 }
 
 /**
+ * What goes in each box and what's stamped on it, worked out from inventory
+ * (never typed): every slip code becomes our own products — its SKU, or what a
+ * person verified it to be (dispatch_code_info) — times the quantity on the
+ * slip, shared over the order's labels. The stamp is the inventory name (or its
+ * short stamp name) with the count in each box: "4 X PYREX GLASS MEASURING JUG 500ML".
+ *   codeInfo: Map(normRef(code) → { status, items: [{ code, name, stamp, qty }], kind, wanted_name })
+ * Returns { mapping, unverified: [codes nobody has verified], problem }.
+ */
+export function autoMapping(items, labelCount, codeInfo) {
+  const unverified = []
+  const totals = new Map()
+  const instead = new Set()
+  for (const it of items) {
+    const info = codeInfo.get(normRef(it.code))
+    if (!info || !['own', 'verified'].includes(info.status) || !(info.items || []).length) {
+      unverified.push({ code: it.code, name: it.name, qty: it.qty, status: info?.status || 'unknown', suggest: info?.items || [] })
+      continue
+    }
+    if (info.kind === 'substitute' && info.wanted_name) instead.add(info.wanted_name)
+    const q = parseInt(it.qty, 10) || 0
+    for (const p of info.items) {
+      const k = normRef(p.code)
+      const t = totals.get(k) || { code: p.code, name: p.name, stamp: p.stamp || p.name, units: 0 }
+      t.units += q * (Number(p.qty) || 1)
+      totals.set(k, t)
+    }
+  }
+  if (unverified.length) return { mapping: null, unverified, problem: null }
+  const products = [...totals.values()].filter(p => p.units > 0)
+  if (!products.length) return { mapping: null, unverified: [], problem: null }
+  const boxes = Math.max(1, labelCount || 1)
+  const contents = products.map(p => `${p.units} × ${p.name} (${p.code})`).join(' + ')
+    + (instead.size ? ` · sent instead of ${[...instead].join(', ')}` : '')
+  const base = { item_key: itemKey(items), contents, parcels: boxes, auto: true, products, instead: [...instead] }
+  if (products.length === 1) {
+    const p = products[0]
+    const name = stampName(p.stamp || p.name)
+    if (p.units % boxes) {
+      return { mapping: { ...base, label_name: name, stamps: null, base: name }, unverified: [],
+        problem: { level: 'hold', code: 'per-box', perBox: true, text: `${p.units} × ${p.name} over ${boxes} labels doesn't share evenly — can't tell what's in each box` } }
+    }
+    const per = p.units / boxes
+    const stamp = per === 1 ? name : `${per} X ${name}`
+    return { mapping: { ...base, label_name: stamp, stamps: Array.from({ length: boxes }, () => stamp), base: name }, unverified: [], problem: null }
+  }
+  // Different products in one parcel: each with its count
+  const stamp = stampName(products.map(p => `${p.units} X ${p.stamp || p.name}`).join(' + '))
+  if (boxes > 1) {
+    return { mapping: { ...base, label_name: stamp, stamps: null, mixed: true }, unverified: [],
+      problem: { level: 'hold', code: 'per-box', perBox: true, mixed: true, text: `Different products over ${boxes} labels — can't tell what's in each box` } }
+  }
+  return { mapping: { ...base, label_name: stamp, stamps: [stamp], mixed: true }, unverified: [], problem: null }
+}
+
+/**
  * Every order checked before anything is printed. Problems that would send
  * the wrong parcel stop the order ('hold'); things we simply couldn't confirm
  * are shown but don't stop it ('check').
  */
-export function checkOrders(orders, mappings = [], { existing = [], helmCodes = null, unitsByCode = null } = {}) {
+export function checkOrders(orders, mappings = [], { existing = [], helmCodes = null, unitsByCode = null, codeInfo = null } = {}) {
   const byKey = new Map(mappings.map(m => [m.item_key, m]))
   const seen = new Map()
   for (const e of existing) {
@@ -435,21 +490,28 @@ export function checkOrders(orders, mappings = [], { existing = [], helmCodes = 
     const key = itemKey(items)
     const codes = [...new Set(items.map(i => normRef(i.code)))]
     const units = items.reduce((s, i) => s + (parseInt(i.qty, 10) || 0), 0)
-    const { mapping, anyQty } = resolveMapping(items, o.labels.length, byKey)
+    // With what each code is (codeInfo), the stamp is worked out from inventory; without it, from typed mappings
+    const auto = codeInfo && items.length ? autoMapping(items, o.labels.length, codeInfo) : null
+    const { mapping, anyQty } = auto ? { mapping: auto.mapping, anyQty: false } : resolveMapping(items, o.labels.length, byKey)
 
     if (!o.slip) problems.push({ level: 'manual', code: 'no-slip', text: 'No packing slip — say what this parcel is' })
     else if (!items.length) problems.push({ level: 'hold', code: 'no-items', text: 'Couldn\'t read the items on the packing slip' })
+    else if (auto?.unverified.length) {
+      problems.push({ level: 'verify', code: 'verify', codes: auto.unverified,
+        text: `Not verified yet: ${auto.unverified.map(u => u.code).join(', ')} — someone with “Link item codes” confirms what it is first` })
+    } else if (auto && !mapping) problems.push({ level: 'hold', code: 'no-items', text: 'Nothing to send on the packing slip' })
     else if (!mapping) problems.push({ level: 'map', code: 'unmapped', text: 'New item — set what goes in each parcel' })
+    if (auto?.problem) problems.push(auto.problem)
 
     if (o.slip && !o.labels.length) problems.push({ level: 'hold', code: 'no-label', text: 'Packing slip with no label' })
-    if (mapping && anyQty && o.labels.length && !o.slip?.manual) {
+    if (!auto && mapping && anyQty && o.labels.length && !o.slip?.manual) {
       // Set up for any quantity: "parcels" is how many units go in each box.
       // If the labels don't add up, we can't say what's in each box — so ask.
       const expect = Math.ceil(units / Math.max(1, mapping.parcels || 1))
       if (o.labels.length !== expect) problems.push({ level: 'hold', code: 'count', perBox: true, text: `${units} units at ${mapping.parcels || 1} a box should be ${expect} label${expect !== 1 ? 's' : ''}, has ${o.labels.length} — can't tell what's in each box` })
     }
     // A new item whose code HELM doesn't know: say so, so the slip gets a second look before it's set up
-    if (helmCodes && helmCodes.size && o.slip && !o.slip.manual && !mapping) {
+    if (!auto && helmCodes && helmCodes.size && o.slip && !o.slip.manual && !mapping) {
       const unknown = items.filter(i => !helmCodes.has(normRef(i.code)))
       if (unknown.length) problems.push({ level: 'map', code: 'unknown-code', text: `${unknown.map(i => i.code).join(', ')} isn't in HELM's product list — check the code before setting it up` })
     }
@@ -458,7 +520,9 @@ export function checkOrders(orders, mappings = [], { existing = [], helmCodes = 
       const kgs = items.map(itemKg)
       if (kgs.every(k => k != null)) {
         const unitKg = items.length === 1 ? kgs[0] : null
-        const boxes = anyQty && unitKg != null
+        const boxes = auto && mapping.stamps && unitKg != null
+          ? mapping.stamps.map(t => (parseInt(t, 10) || 1) * unitKg)
+          : anyQty && unitKg != null
           ? boxStamps(mapping, items, o.labels.length, { anyQty, manual: !!o.slip?.manual }).map(t => (parseInt(t, 10) || 1) * unitKg)
           : Array.from({ length: o.labels.length }, () => items.reduce((t, it, k) => t + kgs[k] * (parseInt(it.qty, 10) || 0), 0) / o.labels.length)
         const heaviest = Math.max(...boxes)
@@ -469,7 +533,7 @@ export function checkOrders(orders, mappings = [], { existing = [], helmCodes = 
       }
     }
     // The stamp must say what's actually in each box
-    if (mapping && unitsByCode) {
+    if (!auto && mapping && unitsByCode) {
       const wrong = stampCountProblem(mapping, unitsByCode)
       if (wrong) problems.push({ level: 'hold', code: 'stamp-count', text: `${wrong.text} ("${mapping.label_name}") — fix it under Parcel mappings` })
     }
@@ -492,7 +556,7 @@ export function checkOrders(orders, mappings = [], { existing = [], helmCodes = 
         }
       }
     }
-    if (mapping && !anyQty && !o.slip?.manual && o.labels.length && o.labels.length !== mapping.parcels) {
+    if (!auto && mapping && !anyQty && !o.slip?.manual && o.labels.length && o.labels.length !== mapping.parcels) {
       problems.push({ level: 'hold', code: 'count', text: `Should have ${mapping.parcels} label${mapping.parcels !== 1 ? 's' : ''}, has ${o.labels.length}` })
     }
 
@@ -528,14 +592,17 @@ export function checkOrders(orders, mappings = [], { existing = [], helmCodes = 
 
     const level = problems.some(p => p.level === 'hold') ? 'hold'
       : problems.some(p => p.level === 'manual') ? 'manual'
+      : problems.some(p => p.level === 'verify') ? 'verify'
       : problems.some(p => p.level === 'map') ? 'map'
       : problems.some(p => p.level === 'check') ? 'check' : 'ok'
     // What to stamp on each box. Normally the parcel name; for "any quantity" items
     // each box says exactly how many it holds (2 X …, and 1 X … for an odd last one)
-    const stamps = mapping ? boxStamps(mapping, items, o.labels.length, { anyQty, manual: !!o.slip?.manual }) : []
+    const stamps = auto ? (mapping?.stamps || []) : mapping ? boxStamps(mapping, items, o.labels.length, { anyQty, manual: !!o.slip?.manual }) : []
     o = { ...o, labels: o.labels.map((l, k) => ({ ...l, stampName: stamps[k] || mapping?.label_name })) }
     return {
-      ...o, id: `o${i}`, key, mapping, anyQty, problems, level,
+      ...o, id: `o${i}`, key, mapping, anyQty, problems, level, auto: !!auto,
+      // Never sent without a person: codes not verified, or boxes the portal can't fill on its own
+      blocked: problems.some(p => p.code === 'verify' || p.code === 'per-box'),
       orderKey: o.slip?.channelRef || o.slip?.helmOrder || `page-${o.labels[0]?.pageIndex ?? i}`,
     }
   })
@@ -712,7 +779,7 @@ export function pickTotals(labels = [], unitsByCode = null) {
  * the checked orders, the product lines to batch, and what's held back.
  * Used both when reading finishes in the background and on the review screen.
  */
-export function planUpload(orders, mappings, { existing = [], overrides = {}, carrierFix = {}, manual = {}, helmCodes = null, unitsByCode = null } = {}) {
+export function planUpload(orders, mappings, { existing = [], overrides = {}, carrierFix = {}, manual = {}, helmCodes = null, unitsByCode = null, codeInfo = null } = {}) {
   const fixed = orders.map((o, i) => {
     const fix = carrierFix[`o${i}`]
     let out = fix?.carrier && fix?.service ? { ...o, labels: o.labels.map(l => (l.carrier ? l : { ...l, carrier: fix.carrier, service: fix.service })) } : o
@@ -721,12 +788,14 @@ export function planUpload(orders, mappings, { existing = [], overrides = {}, ca
     if (!o.slip && m?.mapping) out = { ...out, slip: manualSlip(out.labels[0], m) }
     return out
   })
-  const checked = checkOrders(fixed, mappings, { existing, helmCodes, unitsByCode })
-  // Only orders checked every way go in on their own; anything the portal couldn't confirm waits for a person
-  const included = (o) => (o.id in overrides ? overrides[o.id] && !!o.mapping : o.level === 'ok')
+  const checked = checkOrders(fixed, mappings, { existing, helmCodes, unitsByCode, codeInfo })
+  // Only orders checked every way go in on their own; anything the portal couldn't confirm waits for a person.
+  // Codes nobody has verified, and boxes it can't fill, can't be ticked through: they go to On hold
+  const included = (o) => !o.blocked && (o.id in overrides ? overrides[o.id] && !!o.mapping : o.level === 'ok')
   const batches = buildBatches(checked, { include: included })
   const heldBack = checked.filter(o => !included(o))
-  const needsYou = checked.filter(o => o.level !== 'ok' && !(o.id in overrides)).length
+  // Codes waiting to be verified don't stop the rest saving: those orders wait in On hold, in this batch
+  const needsYou = checked.filter(o => o.level !== 'ok' && o.level !== 'verify' && !(o.id in overrides)).length
   return { checked, batches, heldBack, included, needsYou }
 }
 

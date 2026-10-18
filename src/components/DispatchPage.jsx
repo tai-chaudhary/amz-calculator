@@ -5,10 +5,10 @@ import {
   loadHeldLabels, loadDispatchUploads, loadDispatchLabel, downloadDispatchFile, saveDispatchUpload,
   releaseHeldLabels, cancelDispatchLabels, markBatchesPrinted,
   loadBatchStats, loadOpenLabels, dispatchBatch, dispatchLabelIds, searchDispatchLabels, markLabelReprinted, loadDayLabels,
-  packBatch, loadDashboardLabels, loadItemUnits, saveItemUnits, loadSubstitutes,
+  packBatch, loadDashboardLabels, loadItemUnits, saveItemUnits, loadSubstitutes, loadCodeInfo,
 } from '../lib/db'
 import {
-  itemKey, suggestLabelName, londonDate, decode, planUpload, manualSlip, samePostcode, summariseDispatch, guessUnits, normRef,
+  itemKey, suggestLabelName, londonDate, decode, planUpload, manualSlip, autoMapping, samePostcode, summariseDispatch, guessUnits, normRef,
   suggestStamp, stampName, missingDetail, helmProductsToUnits, nextWorkingDay, londonTime, resolveMapping, boxStamps,
   stampCountProblem, fixedStamp, unitsPerBox, stampProgress, ORDER_STAGES,
   parseRanges, compressRanges, isDelayed, daysLate, pickTotals, byPrintOrder,
@@ -18,6 +18,7 @@ import { buildPrintFile, printPdf, downloadPdf, buildCollectionSheet, pagesAsIma
 import { startJob, subscribeJobs, dismissJob, toldJobs } from '../lib/dispatchJobs'
 import NewOrdersCard from './NewOrdersCard'
 import { PickList, ShortCheck, SubstituteFlow } from './PickList'
+import { CodesToVerify } from './VerifyCode'
 
 // The carriers and services a label can be put down as when it couldn't be read
 const CARRIERS = { DHL: ['Next Day'], Evri: ['Next Day', 'Standard'] }
@@ -737,6 +738,12 @@ function UploadFlow({ me, job = null, mappings, pickers = [], cutoff = '18:00', 
   const read = job?.read || null
   const existing = job?.existing || []
   const [overrides, setOverrides] = useState({})    // order id → true (include) / false (hold)
+  // What each code is (ours, verified, or not yet): stamps come from it. Looked up again once one is verified
+  const [codeInfo, setCodeInfo] = useState(job?.codeInfo || null)
+  const refreshCodes = async () => {
+    const codes = [...(read?.orders || []).flatMap(o => (o.slip?.items || []).map(i => i.code)), ...mappings.flatMap(m => (m.items || []).map(i => i.code))]
+    try { setCodeInfo(await loadCodeInfo(codes)) } catch (e) { showToast?.(`Couldn't check the codes again — ${e?.message || 'try again'}`, 'error') }
+  }
   const [carrierFix, setCarrierFix] = useState({})  // order index → { carrier, service } for labels it couldn't read
   const [manual, setManual] = useState({})          // order index → { mapping, qty, reason, note, originalRef } for labels with no slip
   const history = job?.history || []
@@ -761,14 +768,24 @@ function UploadFlow({ me, job = null, mappings, pickers = [], cutoff = '18:00', 
   }
 
   const { checked, batches, heldBack, included } = useMemo(
-    () => (read ? planUpload(read.orders, mappings, { existing, overrides, carrierFix, manual, helmCodes: job?.helmCodes || null, unitsByCode: job?.unitsByCode || null }) : { checked: [], batches: [], heldBack: [], included: () => false }),
-    [read, mappings, existing, overrides, carrierFix, manual],
+    () => (read ? planUpload(read.orders, mappings, { existing, overrides, carrierFix, manual, helmCodes: job?.helmCodes || null, unitsByCode: job?.unitsByCode || null, codeInfo }) : { checked: [], batches: [], heldBack: [], included: () => false }),
+    [read, mappings, existing, overrides, carrierFix, manual, codeInfo],
   )
   const toMap = useMemo(() => {
     const m = new Map()
     for (const o of checked) if (o.level === 'map' && !m.has(o.key)) m.set(o.key, { key: o.key, items: o.slip.items, orders: [] })
     for (const o of checked) if (o.level === 'map') m.get(o.key).orders.push(o)
     return [...m.values()]
+  }, [checked])
+  // Codes nobody has verified yet, each once, with how many orders wait on it
+  const toVerify = useMemo(() => {
+    const m = new Map()
+    for (const o of checked) for (const p of o.problems) if (p.code === 'verify') for (const c of p.codes) {
+      const k = c.code
+      if (!m.has(k)) m.set(k, { ...c, orders: 0 })
+      m.get(k).orders++
+    }
+    return [...m.values()].sort((a, b) => b.orders - a.orders)
   }, [checked])
   const holds = checked.filter(o => o.level === 'hold')
   const unsaid = checked.filter(o => o.level === 'manual').length
@@ -865,8 +882,8 @@ function UploadFlow({ me, job = null, mappings, pickers = [], cutoff = '18:00', 
             <Metric label="Orders" value={checked.length} />
             <Metric label="Labels" value={labelTotal} sub={read.skipped ? `${read.skipped} other page${read.skipped !== 1 ? 's' : ''} left out` : undefined} />
             <Metric label="Products" value={batches.length} />
-            <Metric label="Need you" value={toMap.length + holds.length + unsaid} tone={toMap.length + holds.length + unsaid ? 'text-loss' : 'text-gain'}
-              sub={toMap.length + holds.length + unsaid ? 'see below' : 'all checked'} />
+            <Metric label="Need you" value={toVerify.length + toMap.length + holds.length + unsaid} tone={toVerify.length + toMap.length + holds.length + unsaid ? 'text-loss' : 'text-gain'}
+              sub={toVerify.length + toMap.length + holds.length + unsaid ? 'see below' : 'all checked'} />
           </div>
 
           {error && <WarnBox title="Not saved">{error}</WarnBox>}
@@ -891,6 +908,14 @@ function UploadFlow({ me, job = null, mappings, pickers = [], cutoff = '18:00', 
                   read.orders.forEach((o, i) => { if (!o.slip && !n[`o${i}`]?.mapping) n[`o${i}`] = v })
                   return n
                 })} />
+            </section>
+          )}
+
+          {toVerify.length > 0 && (
+            <section>
+              <SectionTitle title={`Check what ${toVerify.length === 1 ? 'this code is' : `these ${toVerify.length} codes are`} — once`}
+                sub="Codes that aren't one of our SKUs and nobody has verified yet. Say which product each one is and how many: every order with it takes that stock and gets that stamp from then on. Anything not verified now waits in On hold, in this batch." />
+              <CodesToVerify codes={toVerify} me={me} showToast={showToast} onVerified={refreshCodes} />
             </section>
           )}
 
@@ -1113,6 +1138,15 @@ function HeldList({ held, mappings, highlight, me, onChanged, showToast, onLog, 
   const [cancelling, setCancelling] = useState(false)
   const [fixes, setFixes] = useState({})          // order key → { carrier, service, checked }
   const [viewing, setViewing] = useState(null)
+  // What each code is: the stamp comes from inventory, and codes nobody has verified wait for someone who can
+  const [codeInfo, setCodeInfo] = useState(null)
+  const codesKey = useMemo(() => [...new Set([...held.flatMap(l => (l.items || []).map(i => i.code)), ...mappings.flatMap(m => (m.items || []).map(i => i.code))])].sort().join('|'), [held, mappings])
+  const refreshCodes = useCallback(() => {
+    if (!codesKey) { setCodeInfo(new Map()); return }
+    // Couldn't look them up: nothing is released until it can (never back to typed stamps)
+    loadCodeInfo(codesKey.split('|')).then(setCodeInfo).catch(() => { setCodeInfo(null); showToast?.('Couldn\'t check the item codes — try again in a moment', 'error') })
+  }, [codesKey])
+  useEffect(() => { refreshCodes() }, [refreshCodes])
 
   const orders = useMemo(() => {
     const m = new Map()
@@ -1127,13 +1161,23 @@ function HeldList({ held, mappings, highlight, me, onChanged, showToast, onLog, 
       const fix = fixes[o.key] || {}
       const noSlip = !(o.first.items || []).length
       // A hand-made label with no slip: the person says what it is
-      const resolved = noSlip ? { mapping: fix.manual?.mapping || null, anyQty: String(fix.manual?.mapping?.item_key || '').endsWith('x*') } : resolveMapping(o.first.items || [], real.length, byKey)
+      // The items: from the slip, or what the person said a slip-less label is
+      const told = noSlip && fix.manual?.mapping ? manualSlip(o.first, fix.manual) : null
+      const items = told ? told.items : (o.first.items || [])
+      // Stamps from inventory once the codes are known; typed mappings only if they couldn't be looked up
+      const auto = codeInfo && items.length ? autoMapping(items, real.length, codeInfo) : null
+      const resolved = auto ? { mapping: auto.mapping, anyQty: false }
+        : noSlip ? { mapping: fix.manual?.mapping || null, anyQty: String(fix.manual?.mapping?.item_key || '').endsWith('x*') } : resolveMapping(o.first.items || [], real.length, byKey)
       const mapping = resolved.mapping
       const anyQty = resolved.anyQty
-      const units = (o.first.items || []).reduce((t, i) => t + (parseInt(i.qty, 10) || 0), 0)
-      // An any-quantity order whose labels don't add up: the person says what's in each box
-      const perBoxNeeded = !noSlip && anyQty && /can't tell what's in each box/.test(String(o.first.hold_reason || ''))
-      const boxes = fix.boxes || (mapping && anyQty ? boxStamps(mapping, o.first.items || [], real.length, { anyQty }).map(t => parseInt(t, 10) || 1) : [])
+      const unverified = auto?.unverified || []
+      const mixedBoxes = !!auto?.problem?.mixed
+      // Units of our product in the order (a 2-pack ordered twice is 4), or the slip's count without inventory
+      const units = auto?.mapping?.products?.length === 1 ? auto.mapping.products[0].units : (o.first.items || []).reduce((t, i) => t + (parseInt(i.qty, 10) || 0), 0)
+      // Labels that don't share the order evenly: the person says what's in each box
+      const perBoxNeeded = auto ? !!auto.problem?.perBox && !mixedBoxes
+        : !noSlip && anyQty && /can't tell what's in each box/.test(String(o.first.hold_reason || ''))
+      const boxes = fix.boxes || (!auto && mapping && anyQty ? boxStamps(mapping, o.first.items || [], real.length, { anyQty }).map(t => parseInt(t, 10) || 1) : [])
       const boxesOk = !perBoxNeeded || (boxes.length === real.length && boxes.every(n => n > 0) && boxes.reduce((t, n) => t + n, 0) === units)
       const needsCarrier = real.some(l => !l.carrier)
       const reason = String(o.first.hold_reason || '')
@@ -1141,14 +1185,26 @@ function HeldList({ held, mappings, highlight, me, onChanged, showToast, onLog, 
       const needsCheck = /match|postcode|should have|already uploaded|different carriers|label says|isn't in helm|couldn't be/i.test(reason) && !/can't tell what's in each box/.test(reason)
       const steps = {
         label: real.length > 0,
+        codes: !!codeInfo,
+        verified: unverified.length === 0,
         mapping: !!mapping,
+        mixed: !mixedBoxes || !!fix.mixedChecked,
         carrier: !needsCarrier || (fix.carrier && fix.service),
         checked: !needsCheck || !!fix.checked,
       }
       steps.boxes = boxesOk
-      return { ...o, real, mapping, anyQty, units, perBoxNeeded, boxes, fix, noSlip, needsCarrier, needsCheck, steps, releasable: Object.values(steps).every(Boolean) }
+      return { ...o, real, mapping, anyQty, auto: !!auto, told, items, unverified, mixedBoxes, units, perBoxNeeded, boxes, fix, noSlip, needsCarrier, needsCheck, steps, releasable: Object.values(steps).every(Boolean) }
     })
-  }, [held, mappings, fixes])
+  }, [held, mappings, fixes, codeInfo])
+  // Codes waiting to be verified, each once, with how many held orders wait on it
+  const toVerify = useMemo(() => {
+    const m = new Map()
+    for (const o of orders) for (const c of o.unverified) {
+      if (!m.has(c.code)) m.set(c.code, { ...c, orders: 0 })
+      m.get(c.code).orders++
+    }
+    return [...m.values()].sort((a, b) => b.orders - a.orders)
+  }, [orders])
 
   if (!orders.length) {
     return <div className="surface"><EmptyState icon="check" title="Nothing on hold" sub="Orders the portal couldn't check safely wait here until someone has looked at them." /></div>
@@ -1164,13 +1220,17 @@ function HeldList({ held, mappings, highlight, me, onChanged, showToast, onLog, 
     try {
       const groups = new Map()
       for (const o of list) {
-        const told = o.noSlip && o.fix.manual ? manualSlip(o.first, o.fix.manual) : null
-        const items = told ? told.items : (o.first.items || [])
-        // What's stamped on each box: from the person's counts, or worked out the same way as at upload
-        const base = String(o.mapping.label_name).replace(/^\s*\d+\s*[X×]\s*/i, '').trim()
-        const names = o.anyQty && o.perBoxNeeded
-          ? o.boxes.map(n => (n === 1 ? `1 X ${base}` : `${n} X ${base}`))
-          : boxStamps(o.mapping, items, o.real.length, { anyQty: o.anyQty, manual: !!told })
+        const told = o.told
+        const items = o.items
+        // What's stamped on each box: from inventory, the person's counts where the boxes differ, or (no inventory) as at upload
+        const base = o.mapping.base || String(o.mapping.label_name).replace(/^\s*\d+\s*[X×]\s*/i, '').trim()
+        const names = o.auto
+          ? (o.perBoxNeeded ? o.boxes.map(n => (n === 1 ? base : `${n} X ${base}`))
+            : o.mixedBoxes ? o.real.map(() => o.mapping.label_name)
+              : o.mapping.stamps)
+          : o.anyQty && o.perBoxNeeded
+            ? o.boxes.map(n => (n === 1 ? `1 X ${base}` : `${n} X ${base}`))
+            : boxStamps(o.mapping, items, o.real.length, { anyQty: o.anyQty, manual: !!told })
         const labels = o.real.map((l, k) => ({
           ...(l.carrier ? l : { ...l, carrier: o.fix.carrier, service: o.fix.service }),
           stampName: names[k] || o.mapping.label_name,
@@ -1207,6 +1267,13 @@ function HeldList({ held, mappings, highlight, me, onChanged, showToast, onLog, 
 
   return (
     <>
+      {toVerify.length > 0 && (
+        <div className="card mb-4 border-l-2 border-l-warn">
+          <div className="text-sm font-semibold text-ink">{toVerify.length === 1 ? '1 code to verify' : `${toVerify.length} codes to verify`}</div>
+          <div className="text-xs text-ink/55 mt-0.5 mb-3">Not one of our SKUs, and nobody has said what it is yet. Once it's verified, its orders can go back into their batch — stamped from inventory.</div>
+          <CodesToVerify codes={toVerify} me={me} showToast={showToast} onVerified={() => { refreshCodes(); onChanged() }} />
+        </div>
+      )}
       <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
         <div className="text-xs text-ink/55">Fix what's listed under each order, then add it back to its own batch — it prints with that batch's number.</div>
         {ready.length > 0 && picked.size === 0 && (
@@ -1274,7 +1341,20 @@ function HeldList({ held, mappings, highlight, me, onChanged, showToast, onLog, 
                         <div className="mt-1.5"><ProductPicker value={o.fix.manual} mappings={mappings} onChange={(v) => setFix(o.key, { manual: v })} /></div>
                       </div>
                     )}
-                    {!o.mapping && o.first.items?.length > 0 && (
+                    {o.unverified.length > 0 && (
+                      <div className="text-xs text-warn">Waiting for {o.unverified.map(c => c.code).join(', ')} to be verified (above)</div>
+                    )}
+                    {o.mapping?.auto && o.steps.verified && (
+                      <div className="text-xs text-ink/60">Stamp from inventory: <b className="text-ink">{o.mixedBoxes || o.perBoxNeeded ? o.mapping.base || o.mapping.label_name : o.mapping.label_name}</b>
+                        {o.mapping.instead?.length > 0 && <span className="text-warn"> · sent instead of {o.mapping.instead.join(', ')}</span>}</div>
+                    )}
+                    {o.mixedBoxes && o.mapping && (
+                      <label className="flex items-center gap-2 text-xs text-ink/70 cursor-pointer">
+                        <input type="checkbox" className="w-4 h-4 accent-royal-500" checked={!!o.fix.mixedChecked} onChange={e => setFix(o.key, { mixedChecked: e.target.checked })} />
+                        Different products over {o.real.length} boxes — I've checked what goes in each, and every box gets the full stamp
+                      </label>
+                    )}
+                    {!o.auto && !o.mapping && o.first.items?.length > 0 && (
                       <div className="text-xs">
                         <span className="text-ink/65">Set up this item — what's stamped on the label and what goes in each parcel:</span>
                         <HeldMapping order={o} me={me} showToast={showToast} onSaved={(m) => onMappingsChanged([...mappings.filter(x => x.item_key !== m.item_key), m])} />

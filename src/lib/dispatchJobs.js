@@ -8,7 +8,7 @@
  */
 import { readDispatchFile, releaseOcr } from './dispatchPdf'
 import { pairPages, planUpload, londonDate } from './dispatch'
-import { loadDispatchMappings, findExistingOrders, saveDispatchUpload, findCustomerHistory, loadItemUnits } from './db'
+import { loadDispatchMappings, findExistingOrders, saveDispatchUpload, findCustomerHistory, loadItemUnits, loadCodeInfo } from './db'
 
 let jobs = []
 const listeners = new Set()
@@ -63,25 +63,30 @@ async function run(id) {
     const helmCodes = new Set(units.filter(u => u.source === 'helm').map(u => u.code_key))
     const read = { pages, bytes, ...paired }
     const unitsByCode = new Map(units.map(u => [u.code_key, u]))
-    const plan = planUpload(paired.orders, mappings, { existing, helmCodes, unitsByCode })
+    // What every code is — ours, verified, or not yet — so stamps come from inventory, never typed.
+    // Codes in mappings too: a label with no slip is told what it is from one of those
+    const codes = [...paired.orders.flatMap(o => (o.slip?.items || []).map(i => i.code)), ...mappings.flatMap(m => (m.items || []).map(i => i.code))]
+    const codeInfo = await loadCodeInfo(codes)
+    const plan = planUpload(paired.orders, mappings, { existing, helmCodes, unitsByCode, codeInfo })
 
     // Nothing for a person to decide: save it as a batch now
-    if (plan.needsYou === 0 && plan.batches.length) {
+    if (plan.needsYou === 0 && (plan.batches.length || plan.heldBack.length)) {
       patch(id, { status: 'saving', read, existing, history })
       const { me, picker, title, onLog } = job.meta
-      const held = plan.heldBack.map(o => ({ ...o, holdReason: 'Held back at upload to check' }))
+      // Waiting in On hold, in this batch, saying exactly why (codes to verify, boxes to fill)
+      const held = plan.heldBack.map(o => ({ ...o, holdReason: o.problems.filter(p => p.level !== 'check').map(p => p.text).join('; ') || 'Held back at upload to check' }))
       const result = await saveDispatchUpload({
         file: job.file, bytes, pageCount: pages.length, batches: plan.batches, held, me, shipDate: job.meta.shipDate || londonDate(), picker, title,
       })
       onLog?.({
         entity_type: 'dispatch', entity_id: result.upload.id, entity_name: job.file.name, action: 'Labels uploaded',
-        detail: `Batch ${result.upload.code} · ${plan.batches.reduce((s, b) => s + b.labels.length, 0)} labels · saved automatically`,
+        detail: `Batch ${result.upload.code} · ${plan.batches.reduce((s, b) => s + b.labels.length, 0)} labels · saved automatically${held.length ? ` · ${held.length} on hold` : ''}`,
         source: 'dispatch',
       })
       patch(id, { status: 'saved', result, shipDate: job.meta.shipDate || londonDate(), labels: plan.batches.reduce((s, b) => s + b.labels.length, 0), read: null })
       return
     }
-    patch(id, { status: 'review', read, existing, history, helmCodes, unitsByCode, needsYou: plan.needsYou })
+    patch(id, { status: 'review', read, existing, history, helmCodes, unitsByCode, codeInfo, needsYou: plan.needsYou })
   } catch (e) {
     patch(id, { status: 'error', error: e?.message || 'Couldn\'t read that file' })
   }

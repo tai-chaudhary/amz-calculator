@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { LOCKABLE, ROLES, roleLabel, canAccess, pageLabel } from '../lib/access'
+import { LOCKABLE, ROLES, roleLabel, canAccess, pageLabel, CAPABILITIES, isCapability } from '../lib/access'
 import { PageHeader, Icon, StatusBadge, Modal, Drawer, EmptyState, SearchInput } from './UI'
 
 const randomPassword = () => {
@@ -67,8 +67,8 @@ export default function TeamPage({ profiles, me, onCreate, onUpdate, onSetPasswo
                         <span className="text-xs text-gain font-medium">Every section, including cost settings and this page</span>
                       ) : granted.length === 0 ? (
                         <span className="text-xs text-warn font-medium">No sections yet — they’ll see the dashboard only</span>
-                      ) : LOCKABLE.filter(x => granted.includes(x.id)).map(x => (
-                        <span key={x.id} className="link-chip" title={x.label}><Icon name={x.icon} size={12} />{x.label}</span>
+                      ) : [...LOCKABLE, ...CAPABILITIES].filter(x => granted.includes(x.id)).map(x => (
+                        <span key={x.id} className={`link-chip ${isCapability(x.id) ? 'border-royal-300 text-royal-700' : ''}`} title={x.label}><Icon name={x.icon} size={12} />{x.label}</span>
                       ))}
                     </div>
                   </div>
@@ -91,6 +91,8 @@ export default function TeamPage({ profiles, me, onCreate, onUpdate, onSetPasswo
 /** Role picker plus the checklist — choosing a role ticks the boxes for you. */
 function AccessPicker({ role, permissions, onRole, onPermissions, disabled }) {
   const all = LOCKABLE.map(x => x.id)
+  // Ticking pages (or choosing a role) never takes away what someone is trusted to do
+  const caps = permissions.filter(isCapability)
   const toggle = (id) => onPermissions(permissions.includes(id) ? permissions.filter(x => x !== id) : [...permissions, id])
   return (
     <div>
@@ -99,7 +101,7 @@ function AccessPicker({ role, permissions, onRole, onPermissions, disabled }) {
         {Object.entries(ROLES).map(([key, r]) => (
           <button key={key} type="button" disabled={disabled}
             className={`text-left p-3 rounded-lg border transition-colors ${role === key ? 'border-royal-400 bg-royal-50' : 'border-rule bg-white hover:border-royal-200'}`}
-            onClick={() => { onRole(key); onPermissions(r.pages()) }}>
+            onClick={() => { onRole(key); onPermissions([...r.pages(), ...caps]) }}>
             <div className="text-sm font-semibold text-ink">{r.label}</div>
             <div className="text-xs text-ink/55 mt-0.5">{r.description}</div>
           </button>
@@ -110,8 +112,8 @@ function AccessPicker({ role, permissions, onRole, onPermissions, disabled }) {
         <div className="label mb-0">Sections they can open</div>
         {role !== 'admin' && (
           <div className="flex gap-2">
-            <button type="button" className="btn btn-secondary btn-xs" onClick={() => onPermissions(all)}>Tick all</button>
-            <button type="button" className="btn btn-secondary btn-xs" onClick={() => onPermissions([])}>Clear</button>
+            <button type="button" className="btn btn-secondary btn-xs" onClick={() => onPermissions([...all, ...caps])}>Tick all</button>
+            <button type="button" className="btn btn-secondary btn-xs" onClick={() => onPermissions(caps)}>Clear</button>
           </div>
         )}
       </div>
@@ -130,6 +132,23 @@ function AccessPicker({ role, permissions, onRole, onPermissions, disabled }) {
         </div>
       )}
       <div className="text-xs text-ink/50 mt-2">The dashboard is always available — everything on it links to sections, and locked ones stay hidden.</div>
+
+      <div className="label mt-5">Trusted to</div>
+      {role === 'admin' ? (
+        <div className="text-xs text-ink/55">Admins can do all of these.</div>
+      ) : (
+        <div className="space-y-1.5">
+          {CAPABILITIES.map(x => (
+            <label key={x.id} className={`flex items-start gap-2.5 px-3 py-2.5 rounded-lg border cursor-pointer transition-colors ${permissions.includes(x.id) ? 'border-royal-300 bg-royal-50/60' : 'border-rule bg-white hover:border-royal-200'}`}>
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-royal-500" checked={permissions.includes(x.id)} onChange={() => toggle(x.id)} />
+              <span className="min-w-0">
+                <span className="flex items-center gap-1.5 text-sm text-ink"><Icon name={x.icon} size={15} className="text-ink/45" />{x.label}</span>
+                <span className="block text-xs text-ink/50 mt-0.5 leading-relaxed">{x.description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

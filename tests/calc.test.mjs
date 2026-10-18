@@ -1336,3 +1336,63 @@ test('courier totals and product patterns', () => {
   assert.equal(pats[0].returned, 1); assert.equal(pats[0].trouble, 2); assert.equal(pats[0].failed, 0)
   assert.equal(pats[0].rate, 66.7)
 })
+
+// ── Stamps from inventory: every slip code checked once by a person ─────────
+{
+  const { autoMapping, checkOrders, planUpload, normRef } = await import('../src/lib/dispatch.js')
+  const JUG = { code: 'PYREX-JUG-GLASS-500ML', name: 'Pyrex Glass Measuring Jug 500ml', stamp: 'Pyrex Glass Measuring Jug 500ml', qty: 1 }
+  const BOWL07 = { code: 'PYREX-BOWL-CLASSIC-GLASS-0.7L', name: 'Pyrex Classic Glass Mixing Bowl 0.7L', stamp: 'Pyrex Classic Glass Mixing Bowl 0.7L', qty: 1 }
+  const info = new Map([
+    ['PYREX-JUG-GLASS-500ML', { status: 'own', items: [JUG] }],
+    ['PYREX-JUG-GLASS-500ML-2PK', { status: 'unverified', items: [{ ...JUG, qty: 2 }] }],
+    ['2XPYREXJUG500ML', { status: 'verified', kind: 'same', items: [{ ...JUG, qty: 2 }] }],
+    ['366706946770', { status: 'verified', kind: 'substitute', wanted_name: 'Pyrex 500ml Mixing Bowl', items: [{ ...BOWL07, qty: 2 }] }],
+    ['BROKEN-1', { status: 'broken', items: [] }],
+  ].map(([k, v]) => [normRef(k), v]))
+
+  test('the stamp is the inventory name and the units in each box', () => {
+    const one = autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 5 }], 1, info)
+    assert.equal(one.mapping.label_name, '5 X PYREX GLASS MEASURING JUG 500ML')
+    assert.equal(autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 1 }], 1, info).mapping.label_name, 'PYREX GLASS MEASURING JUG 500ML')
+    // A bundle of 2, two on the slip: 4 jugs
+    const pack = autoMapping([{ code: '2xPyrexJug500ml', qty: 2 }], 1, info)
+    assert.equal(pack.mapping.label_name, '4 X PYREX GLASS MEASURING JUG 500ML')
+    assert.equal(pack.mapping.products[0].units, 4)
+    // Shared evenly over the labels
+    assert.deepEqual(autoMapping([{ code: '2xPyrexJug500ml', qty: 2 }], 2, info).mapping.stamps, ['2 X PYREX GLASS MEASURING JUG 500ML', '2 X PYREX GLASS MEASURING JUG 500ML'])
+  })
+
+  test('codes nobody has verified, and boxes that don\'t share evenly, stop the order', () => {
+    assert.equal(autoMapping([{ code: 'PYREX-JUG-GLASS-500ML-2PK', qty: 1 }], 1, info).unverified[0].status, 'unverified')
+    assert.equal(autoMapping([{ code: 'NEVER-SEEN', qty: 1 }], 1, info).unverified[0].status, 'unknown')
+    assert.equal(autoMapping([{ code: 'BROKEN-1', qty: 1 }], 1, info).unverified.length, 1)
+    // One verified, one not: still stopped
+    assert.equal(autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 1 }, { code: 'NEVER-SEEN', qty: 1 }], 1, info).mapping, null)
+    const odd = autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 3 }], 2, info)
+    assert.equal(odd.problem.code, 'per-box')
+    const mixed = autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 1 }, { code: '366706946770', qty: 1 }], 2, info)
+    assert.equal(mixed.problem.code, 'per-box')
+  })
+
+  test('sent instead: the stamp is what goes in the box, and the listing it should be is kept', () => {
+    const sub = autoMapping([{ code: '366706946770', qty: 1 }], 1, info)
+    assert.equal(sub.mapping.label_name, '2 X PYREX CLASSIC GLASS MIXING BOWL 0.7L')
+    assert.deepEqual(sub.mapping.instead, ['Pyrex 500ml Mixing Bowl'])
+    assert.match(sub.mapping.contents, /sent instead of Pyrex 500ml Mixing Bowl/)
+    const mix = autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 1 }, { code: '366706946770', qty: 1 }], 1, info)
+    assert.equal(mix.mapping.label_name, '1 X PYREX JUG 500ML + 2 X PYREX BOWL 0.7L', 'shortened to fit the label, sizes kept')
+  })
+
+  test('at upload: unverified orders wait in On hold, the rest are batched, and nobody can tick them through', () => {
+    const label = (i, ref) => ({ pageIndex: i, carrier: 'Evri', service: 'Next Day', refs: [ref] })
+    const order = (i, ref, code, qty, labels = 1) => ({ slip: { channelRef: ref, items: [{ code, qty, name: code }], postcode: 'AB1 2CD' }, labels: Array.from({ length: labels }, (_, k) => label(i * 10 + k, ref)) })
+    const orders = [order(0, '204-1', 'PYREX-JUG-GLASS-500ML', 5), order(1, '204-2', 'PYREX-JUG-GLASS-500ML-2PK', 1), order(2, '204-3', '2xPyrexJug500ml', 2, 2)]
+    const checked = checkOrders(orders, [], { codeInfo: info })
+    assert.deepEqual(checked.map(o => o.level), ['ok', 'verify', 'ok'])
+    assert.equal(checked[1].blocked, true)
+    const plan = planUpload(orders, [], { codeInfo: info, overrides: { o1: true } })
+    assert.equal(plan.needsYou, 0, 'only codes to verify: the rest saves on its own')
+    assert.deepEqual(plan.batches.map(b => [b.label_name, b.labels.length]).sort(), [['2 X PYREX GLASS MEASURING JUG 500ML', 2], ['5 X PYREX GLASS MEASURING JUG 500ML', 1]])
+    assert.deepEqual(plan.heldBack.map(o => o.id), ['o1'], 'ticking it through is ignored')
+  })
+}
