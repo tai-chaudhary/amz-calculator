@@ -38,12 +38,14 @@ as $function$
                                                 then u.components end) c on true
     where it.qty > 0
   ), linked as (
-    -- What a code has been linked to in the portal, when it isn't a product's own code
+    -- What a person has said a code is, when it isn't a product's own code (never a guess:
+    -- links learned automatically from order history, how = 'orders', don't count)
     select parts.code, parts.name, parts.units, s.items
     from parts
     left join lateral (
       select x.items from inv_channel_skus x
-      where public.inv_norm(x.sku) = public.inv_norm(parts.code) and jsonb_array_length(coalesce(x.items, '[]'::jsonb)) > 0
+      where public.inv_norm(x.sku) = public.inv_norm(parts.code) and x.how = 'person'
+        and jsonb_array_length(coalesce(x.items, '[]'::jsonb)) > 0
       order by (x.source = 'portal') desc, x.updated_at desc limit 1
     ) s on true
     where not exists (select 1 from inv_products p where p.code_key = public.inv_norm(parts.code))
