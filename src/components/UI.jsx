@@ -237,7 +237,7 @@ export function Modal({ title, description, onClose, children, maxWidth = 'max-w
           </div>
           <button onClick={onClose} className="icon-btn -mr-1 -mt-1" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
-        <div className="p-5 overflow-y-auto overscroll-contain">{children}</div>
+        <div className="p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] sm:pb-5 overflow-y-auto overscroll-contain">{children}</div>
       </div>
     </div>
   )
@@ -258,8 +258,8 @@ export function Drawer({ title, description, onClose, children, footer, width = 
           </div>
           <button onClick={onClose} className="icon-btn flex-shrink-0" aria-label="Close"><Icon name="close" size={18} /></button>
         </div>
-        <div className="flex-1 overflow-y-auto overscroll-contain px-5 sm:px-6 py-5">{children}</div>
-        {footer && <div className="px-5 sm:px-6 py-4 bg-white border-t border-rule">{footer}</div>}
+        <div className={`flex-1 overflow-y-auto overscroll-contain px-5 sm:px-6 py-5 ${footer ? '' : 'pb-[calc(1.25rem+env(safe-area-inset-bottom))]'}`}>{children}</div>
+        {footer && <div className="px-5 sm:px-6 py-4 pb-[calc(1rem+env(safe-area-inset-bottom))] bg-white border-t border-rule">{footer}</div>}
       </aside>
     </div>
   )

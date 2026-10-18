@@ -94,7 +94,7 @@ export default function StockRequestsPage({
       )}
 
       {canOrder && chosen.length > 0 && (
-        <div className="fixed bottom-0 inset-x-0 lg:left-[258px] z-20 bg-white border-t border-rule px-4 py-3 shadow-modal">
+        <div className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] lg:bottom-0 inset-x-0 lg:left-[258px] z-20 bg-white border-t border-rule px-4 py-3 shadow-modal">
           <div className="max-w-5xl mx-auto flex items-center gap-2 flex-wrap">
             <span className="text-sm text-ink font-medium mr-auto">{chosen.length} selected</span>
             <button className="btn btn-secondary btn-sm" onClick={() => setSelected(new Set())}>Clear</button>

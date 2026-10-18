@@ -54,13 +54,14 @@
 @layer components {
   /* Structure first: surfaces are quiet and hierarchy comes from spacing, rules and type. */
   .page-shell { @apply w-full; }
-  .page-header { @apply mb-7 sm:mb-8; }
+  /* Below a laptop the top bar already names the page, so the header shrinks to what's useful */
+  .page-header { @apply mb-5 sm:mb-7 lg:mb-8; }
   .page-eyebrow {
-    @apply text-[11px] font-semibold uppercase text-royal-500 mb-2;
+    @apply text-[11px] font-semibold uppercase text-royal-500 mb-2 max-lg:hidden;
     letter-spacing: .14em;
   }
-  .page-title { @apply text-[30px] sm:text-[34px] leading-[1.08] font-medium; }
-  .page-description { @apply text-sm text-ink/55 mt-2 max-w-2xl leading-relaxed; }
+  .page-title { @apply text-[30px] sm:text-[34px] leading-[1.08] font-medium max-lg:sr-only; }
+  .page-description { @apply text-sm text-ink/55 mt-2 max-lg:mt-0 max-lg:text-[13px] max-w-2xl leading-relaxed; }
   .page-meta { @apply flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink/45 mt-3; }
 
   .card {
@@ -81,7 +82,7 @@
   .section-description { @apply text-xs text-ink/50 mt-0.5 leading-relaxed; }
 
   .metric-card {
-    @apply bg-white border border-rule rounded-card px-4 py-3.5;
+    @apply bg-white border border-rule rounded-card px-3 py-2.5 sm:px-4 sm:py-3.5;
   }
   .metric-label { @apply block text-[11px] font-medium text-ink/50 mb-1.5; }
   .metric-value {
@@ -151,7 +152,9 @@
   .tab-active::after { content: ''; @apply absolute left-0 right-0 bottom-[-1px] h-[2px] bg-royal-500; }
 
   /* Segmented control: filters within one list — visibly different from tabs */
-  .segmented { @apply inline-flex items-center gap-0.5 p-0.5 bg-ink/5 rounded-lg flex-wrap; }
+  /* One line on phones (scrolls sideways if it must), wrapping on bigger screens */
+  .segmented { @apply inline-flex items-center gap-0.5 p-0.5 bg-ink/5 rounded-lg max-w-full overflow-x-auto sm:flex-wrap; scrollbar-width: none; }
+  .segmented::-webkit-scrollbar { display: none; }
   .segment { @apply px-3 py-1.5 rounded-md text-sm font-medium text-ink/60 transition-colors whitespace-nowrap; }
   .segment:hover { @apply text-ink; }
   .segment-active { @apply bg-white text-royal-600 shadow-card; }

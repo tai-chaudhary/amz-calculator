@@ -3,6 +3,21 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.35.0 — 18 Oct 2026
+- Phones: tabs along the bottom for the pages used all day: Dispatch, Tasks, Inventory and Goods in
+  (or whichever four pages that person has), each with its count, plus Menu for everything else.
+  The full menu and search are still at the top. Not shown on a laptop
+- Phones: the page name is in the top bar, so the big heading under it is gone and the header is
+  shorter. Figures (metric cards) are more compact
+- Dispatch on a phone: New Orders starts folded (its counts and warnings still show) so the batches
+  come straight after the day's summary; it remembers if someone opens it. Open, its list scrolls
+  inside the card instead of pushing the batches four screens down
+- Dispatch: each product's status sits beside its courier instead of on a line of its own
+- Tabs like Stock / Shelves / Despatched / Damages / History stay on one line on a phone (swipe for
+  the rest) instead of wrapping
+- iPhone home bar: pop-up sheets, drawers, the menu and the bottom tabs keep clear of it; messages
+  and the update bar sit above the tabs
+
 ## v2.34.0 — 18 Oct 2026
 - Phones get new releases. The portal saved to a home screen stays open in the background for days
   and kept running whatever version it started with. Now every release publishes /version.json,

@@ -59,7 +59,11 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
   const office = me?.role === 'admin'
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem('newOrdersOpen') !== '0' } catch { return true } })
+  // Open on a laptop; on a phone it starts folded (the batches come first) until someone opens it there
+  const [open, setOpen] = useState(() => {
+    const wide = typeof window === 'undefined' || window.matchMedia('(min-width: 1280px)').matches
+    try { const v = localStorage.getItem(wide ? 'newOrdersOpen' : 'newOrdersOpenPhone'); return v === null ? wide : v === '1' } catch { return wide }
+  })
   const [expanded, setExpanded] = useState(() => new Set())
   const [view, setView] = useState(null)        // which list is showing; null = the first with anything in it
   const [q, setQ] = useState('')
@@ -87,7 +91,11 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVis) }
   }, [load])
 
-  const toggleOpen = () => setOpen(v => { try { localStorage.setItem('newOrdersOpen', v ? '0' : '1') } catch { /* fine */ } return !v })
+  const toggleOpen = () => setOpen(v => {
+    const key = window.matchMedia('(min-width: 1280px)').matches ? 'newOrdersOpen' : 'newOrdersOpenPhone'
+    try { localStorage.setItem(key, v ? '0' : '1') } catch { /* fine */ }
+    return !v
+  })
   const toggle = (key) => setExpanded(s => { const n = new Set(s); n.has(key) ? n.delete(key) : n.add(key); return n })
 
   const byKey = useMemo(() => new Map(mappings.map(m => [m.item_key, m])), [mappings])
@@ -293,7 +301,7 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
               )}
 
               {/* The list scrolls on its own on a wide screen, so the page stays put */}
-              <div className={full ? `flex-1 min-h-0 overflow-y-auto overscroll-contain ${groups.length > 1 ? 'lg:overflow-hidden' : ''}` : 'xl:flex-1 xl:min-h-0 xl:overflow-y-auto overscroll-contain'}>
+              <div className={full ? `flex-1 min-h-0 overflow-y-auto overscroll-contain ${groups.length > 1 ? 'lg:overflow-hidden' : ''}` : 'max-h-[65dvh] overflow-y-auto xl:max-h-none xl:flex-1 xl:min-h-0 overscroll-contain'}>
                 {!shownOrders.length ? (
                   <div className="px-4 py-8 text-center text-sm text-ink/50">
                     {words.length ? 'Nothing matches.' : current?.id === 'today' ? (laterDays.length ? 'Nothing for today — the rest ship on a later day.' : 'No new orders for today.') : 'Nothing here.'}

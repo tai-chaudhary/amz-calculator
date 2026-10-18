@@ -2117,10 +2117,12 @@ function BatchCard({ file, statOf, picked, printing, responsible, onPick, onPrin
               <li key={x.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-sky/20 cursor-pointer" onClick={() => onOpenGroup(x)}>
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-ink leading-snug">{x.label_name}</div>
-                  <div className="text-xs text-ink/45 mt-0.5">
-                    {x.contents && x.contents.toUpperCase() !== x.label_name.toUpperCase() ? `${x.contents} · ` : ''}{x.carrier} {x.service}
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+                    <span className="text-xs text-ink/45">
+                      {x.contents && x.contents.toUpperCase() !== x.label_name.toUpperCase() ? `${x.contents} · ` : ''}{x.carrier} {x.service}
+                    </span>
+                    <span className="sm:hidden"><BatchStatus batch={x} stat={st} /></span>
                   </div>
-                  <div className="mt-1 sm:hidden"><BatchStatus batch={x} stat={st} /></div>
                 </div>
                 <div className="hidden sm:block shrink-0 w-[150px]"><BatchStatus batch={x} stat={st} /></div>
                 <div className="shrink-0 text-right tabular-nums w-10">
@@ -2273,7 +2275,7 @@ export function DispatchJobsPill({ onOpen, showToast }) {
   const p = active[0]?.progress
   return (
     <button onClick={onOpen}
-      className="fixed bottom-4 left-4 z-40 card py-2.5 px-3.5 shadow-lg flex items-center gap-2.5 text-left hover:border-royal-300 transition-colors max-w-[320px]">
+      className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] lg:bottom-4 left-4 z-40 card py-2.5 px-3.5 shadow-lg flex items-center gap-2.5 text-left hover:border-royal-300 transition-colors max-w-[320px]">
       <Icon name="printer" size={16} className={active.length ? 'text-royal-500 animate-pulse' : 'text-loss'} />
       <span className="text-xs text-ink">
         {active.length

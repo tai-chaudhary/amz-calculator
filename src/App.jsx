@@ -126,6 +126,10 @@ const Spinner = () => (
 )
 
 
+// The bottom tabs on phones: which pages, in what order, and shorter names where needed
+const TAB_ORDER = ['dispatch', 'tasks', 'inventory', 'goods-in', 'requests', 'tracking']
+const TAB_LABEL = { 'goods-in': 'Goods in', requests: 'Requests', tracking: 'Tracking', 'dispatch-dashboard': 'Dashboard' }
+
 // Old destinations still work: they land on where that job lives now
 const REDIRECTS = {
   review: ['approvals', 'listings'],
@@ -2029,6 +2033,9 @@ export default function App() {
     .filter(p => needsRestock(p.st) && !p.request)
     .sort((a, b) => (a.st.cover ?? 0) - (b.st.cover ?? 0))
   const todayLondon = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date())
+  // Phones: up to four everyday pages along the bottom, warehouse ones first, then whatever else this person uses
+  const mine = visibleNav(me).flatMap(g => g.items)
+  const tabBar = [...TAB_ORDER.map(id => mine.find(i => i.id === id)).filter(Boolean), ...mine.filter(i => !TAB_ORDER.includes(i.id))].slice(0, 4)
   const navCountFor = (id) => {
     if (id === 'saved') return savedCount
     if (id === 'approvals') return reviewCount + proposals.filter(p => p.status === 'pending').length
@@ -2054,7 +2061,7 @@ export default function App() {
       {sidebarOpen && <div className="fixed inset-0 bg-ink/30 backdrop-blur-[2px] z-20 lg:hidden" onClick={() => setSidebarOpen(false)} />}
 
       {/* Sidebar */}
-      <aside aria-label="Main menu" className={`fixed top-0 left-0 h-dvh w-[min(258px,85vw)] lg:w-[258px] bg-white border-r border-rule flex flex-col z-30 transform transition-transform duration-200
+      <aside aria-label="Main menu" className={`fixed top-0 left-0 h-dvh pb-[env(safe-area-inset-bottom)] w-[min(258px,85vw)] lg:w-[258px] bg-white border-r border-rule flex flex-col z-30 transform transition-transform duration-200
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:sticky lg:top-0 lg:z-auto lg:flex-shrink-0`}>
 
         <div className="px-5 pt-6 pb-4">
@@ -2138,7 +2145,7 @@ export default function App() {
           <button className="icon-btn -mr-1" aria-label="Search" onClick={() => { setCommandQuery(''); setCommandOpen(true) }}><Icon name="search" size={18} /></button>
         </div>
 
-        <div className="flex-1 px-4 py-5 sm:px-7 sm:py-7 lg:px-10 lg:py-9 xl:px-12 w-full max-w-[1500px]">
+        <div className={`flex-1 px-4 py-5 sm:px-7 sm:py-7 lg:px-10 lg:py-9 xl:px-12 w-full max-w-[1500px] ${tabBar.length ? 'pb-24 lg:pb-9' : ''}`}>
           {loading || !settings ? <Spinner /> : (
             <Suspense fallback={<Spinner />}>
               {!allowed && (
@@ -2569,6 +2576,31 @@ export default function App() {
             </Suspense>
           )}
         </div>
+        {/* Bottom tabs (phones): the warehouse's everyday pages a thumb away; the full menu is the last tab */}
+        {tabBar.length > 0 && (
+          <nav aria-label="Quick menu" className="lg:hidden fixed bottom-0 inset-x-0 z-20 bg-white/95 backdrop-blur border-t border-rule pb-[env(safe-area-inset-bottom)]">
+            <div className="flex">
+              {tabBar.map(item => {
+                const on = page === item.id
+                const n = navCountFor(item.id)
+                return (
+                  <button key={item.id} onClick={() => navigateTo(item.id)} aria-current={on ? 'page' : undefined}
+                    className={`relative flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 h-14 text-[10.5px] font-medium ${on ? 'text-royal-600' : 'text-ink/55'}`}>
+                    <Icon name={item.icon} size={21} />
+                    <span className="truncate max-w-full px-1">{TAB_LABEL[item.id] || item.label}</span>
+                    {n > 0 && <span className="absolute top-1.5 left-1/2 ml-2 min-w-[17px] h-[17px] px-1 rounded-full bg-coral text-white text-[10px] leading-[17px] text-center tabular-nums">{n > 99 ? '99+' : n}</span>}
+                    {on && <span className="absolute top-0 inset-x-4 h-0.5 rounded-full bg-royal-500" />}
+                  </button>
+                )
+              })}
+              <button onClick={() => setSidebarOpen(true)} aria-expanded={sidebarOpen}
+                className="flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 h-14 text-[10.5px] font-medium text-ink/55">
+                <Icon name="menu" size={21} />
+                <span>Menu</span>
+              </button>
+            </div>
+          </nav>
+        )}
       </main>
 
       {commandOpen && (
@@ -2691,7 +2723,7 @@ export default function App() {
       )}
       </Suspense>
       {update && (
-        <div className="fixed bottom-3 left-3 right-3 sm:left-auto sm:bottom-5 sm:right-5 z-50 sm:max-w-md px-4 py-3 rounded-[6px] bg-royal-600 text-white shadow-modal flex items-center gap-3" role="status">
+        <div className="fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom))] lg:bottom-5 left-3 right-3 sm:left-auto sm:right-5 z-50 sm:max-w-md px-4 py-3 rounded-[6px] bg-royal-600 text-white shadow-modal flex items-center gap-3" role="status">
           <Icon name="sparkles" size={18} className="shrink-0" />
           <span className="flex-1 min-w-0 text-sm leading-snug"><b>New version ready</b>{update.version ? ` (v${update.version})` : ''}. Update to get the latest changes.</span>
           <button className="shrink-0 px-3 py-2 rounded-[5px] bg-white text-royal-700 text-sm font-semibold"
@@ -2701,7 +2733,7 @@ export default function App() {
         </div>
       )}
       {toast && (
-        <div className={`fixed ${update ? 'bottom-[5.5rem]' : 'bottom-3'} left-3 right-3 sm:left-auto ${update ? 'sm:bottom-24' : 'sm:bottom-5'} sm:right-5 z-50 px-4 py-3 rounded-[5px] text-sm font-medium shadow-modal sm:max-w-md flex items-center justify-between gap-4
+        <div className={`fixed ${update ? 'bottom-[calc(9.5rem+env(safe-area-inset-bottom))] lg:bottom-24' : 'bottom-[calc(4.25rem+env(safe-area-inset-bottom))] lg:bottom-5'} left-3 right-3 sm:left-auto sm:right-5 z-50 px-4 py-3 rounded-[5px] text-sm font-medium shadow-modal sm:max-w-md flex items-center justify-between gap-4
           ${toast.type === 'error' ? 'bg-loss text-white' : 'bg-ink text-white'}`} role={toast.type === 'error' ? 'alert' : 'status'}>
           <span>{toast.msg}</span>
           {toast.action && (
