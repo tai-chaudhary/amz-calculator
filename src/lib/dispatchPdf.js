@@ -197,6 +197,35 @@ export async function readDispatchFile(file, onProgress = () => {}) {
   return { pages, bytes }
 }
 
+/**
+ * Reads the tracking strip (the small print under the barcode) on the given
+ * pages of an uploaded file — for labels whose tracking number didn't come
+ * through the first time. Text in the PDF is used when there is any; picture
+ * labels are recognised, enlarged. Returns page index → text read.
+ */
+export async function readTrackingStrips(bytes, indexes, onEach = () => {}) {
+  const pdfjs = await loadPdfjs()
+  const doc = await pdfjs.getDocument({ data: bytes.slice() }).promise
+  const out = new Map()
+  for (const i of indexes) {
+    if (i == null || i < 0 || i >= doc.numPages) { onEach(i); continue }
+    const p = await doc.getPage(i + 1)
+    try {
+      const tc = await p.getTextContent()
+      const words = tc.items.map(t => t.str).join(' ')
+      if (words.trim().length > 20) { out.set(i, words); continue }
+      const v = p.getViewport({ scale: 3 })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.ceil(v.width); canvas.height = Math.ceil(v.height)
+      await p.render({ canvasContext: canvas.getContext('2d'), viewport: v, intent: 'print' }).promise
+      out.set(i, await ocrText(grow(crop(canvas, 0, 0.82, 1, 1), 2)))
+      canvas.width = 0; canvas.height = 0
+    } catch { /* left unread */ } finally { p.cleanup(); onEach(i) }
+  }
+  await doc.destroy()
+  return out
+}
+
 // ── Building the print file ──────────────────────────────────────────────────
 
 let pdfLibPromise = null

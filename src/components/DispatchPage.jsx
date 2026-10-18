@@ -5,16 +5,16 @@ import {
   loadHeldLabels, loadDispatchUploads, loadDispatchLabel, downloadDispatchFile, saveDispatchUpload,
   releaseHeldLabels, cancelDispatchLabels, markBatchesPrinted,
   loadBatchStats, loadOpenLabels, dispatchBatch, dispatchLabelIds, searchDispatchLabels, markLabelReprinted, loadDayLabels,
-  packBatch, loadDashboardLabels, loadItemUnits, saveItemUnits, loadSubstitutes,
+  packBatch, loadDashboardLabels, loadItemUnits, saveItemUnits, loadSubstitutes, loadLabelsMissingTracking, setLabelTracking,
 } from '../lib/db'
 import {
   itemKey, suggestLabelName, londonDate, decode, planUpload, manualSlip, samePostcode, summariseDispatch, guessUnits, normRef,
   suggestStamp, stampName, missingDetail, helmProductsToUnits, nextWorkingDay, londonTime, resolveMapping, boxStamps,
-  stampCountProblem, fixedStamp, unitsPerBox, stampProgress, ORDER_STAGES,
+  stampCountProblem, fixedStamp, unitsPerBox, stampProgress, ORDER_STAGES, parseLabel,
   parseRanges, compressRanges, isDelayed, daysLate, pickTotals, byPrintOrder,
 } from '../lib/dispatch'
 import { exportRowsToCsv, stampedName } from '../lib/csv'
-import { buildPrintFile, printPdf, downloadPdf, buildCollectionSheet, pagesAsImages } from '../lib/dispatchPdf'
+import { buildPrintFile, printPdf, downloadPdf, buildCollectionSheet, pagesAsImages, readTrackingStrips, releaseOcr } from '../lib/dispatchPdf'
 import { startJob, subscribeJobs, dismissJob, toldJobs } from '../lib/dispatchJobs'
 import NewOrdersCard from './NewOrdersCard'
 import { PickList, ShortCheck, SubstituteFlow } from './PickList'
@@ -525,7 +525,10 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
           )}
 
           {tab === 'uploads' && (
-            <UploadsList uploads={uploads} onOpenDay={(d) => { setDate(d); setTab('batches') }} />
+            <>
+              {me?.role === 'admin' && <TrackingRefill showToast={showToast} onLog={onLog} onDone={changed} />}
+              <UploadsList uploads={uploads} onOpenDay={(d) => { setDate(d); setTab('batches') }} />
+            </>
           )}
         </>
       )}
@@ -1539,6 +1542,72 @@ function EditMapping({ mapping, me, showToast, onClose, onSaved }) {
 }
 
 // ── Uploads ──────────────────────────────────────────────────────────────────
+
+/**
+ * Tracking numbers that didn't come through when the labels were read (Evri's
+ * picture labels, mostly). Reads just the tracking strip again on those
+ * labels, enlarged, and fills in what it finds. HELM's numbers, when it has
+ * them, are matched separately every minute and win over anything read here.
+ */
+function TrackingRefill({ showToast, onLog, onDone }) {
+  const [missing, setMissing] = useState(null)
+  const [run, setRun] = useState(null)   // { done, total, found }
+  useEffect(() => { loadLabelsMissingTracking().then(setMissing).catch(() => setMissing([])) }, [])
+  if (!missing?.length && !run) return null
+
+  const go = async () => {
+    const list = missing
+    const state = { done: 0, total: list.length, found: 0 }
+    setRun({ ...state })
+    try {
+      const byUpload = new Map()
+      for (const l of list) {
+        if (!l.upload?.storage_path) { state.done++; continue }
+        if (!byUpload.has(l.upload_id)) byUpload.set(l.upload_id, { path: l.upload.storage_path, labels: [] })
+        byUpload.get(l.upload_id).labels.push(l)
+      }
+      for (const { path, labels } of byUpload.values()) {
+        let bytes
+        try { bytes = await downloadDispatchFile(path) } catch { state.done += labels.length; setRun({ ...state }); continue }
+        const texts = await readTrackingStrips(bytes, labels.map(l => l.page_index), () => { state.done++; setRun({ ...state }) })
+        for (const l of labels) {
+          const t = parseLabel({ items: [], ocr: texts.get(l.page_index) || '' }).tracking
+          if (t) state.found += await setLabelTracking(l.id, t).catch(() => 0)
+        }
+        setRun({ ...state })
+      }
+      onLog?.({ entity_type: 'dispatch', entity_name: 'Tracking numbers', action: 'Filled in',
+        detail: `${state.found} of ${state.total} labels without one`, source: 'dispatch' })
+      showToast?.(`${state.found} tracking number${state.found !== 1 ? 's' : ''} filled in`)
+      setMissing(await loadLabelsMissingTracking().catch(() => []))
+      onDone?.()
+    } catch (e) { showToast?.(e?.message || 'Couldn’t finish', 'error') }
+    finally { releaseOcr(); setRun(r => (r ? { ...r, finished: true } : r)) }
+  }
+
+  const busy = run && !run.finished
+  return (
+    <div className="panel-notice mb-3 flex items-center gap-3 flex-wrap">
+      <div className="min-w-0 flex-1 text-sm">
+        {busy ? (
+          <>
+            <b>Reading tracking numbers…</b> {run.done} of {run.total} · {run.found} found
+            <div className="mt-1.5 h-1.5 rounded-full bg-ink/10 overflow-hidden max-w-md">
+              <div className="h-full bg-royal-500 transition-all" style={{ width: `${Math.round((run.done / Math.max(1, run.total)) * 100)}%` }} />
+            </div>
+            <div className="text-xs text-ink/50 mt-1">Keep this page open until it finishes.</div>
+          </>
+        ) : run?.finished ? (
+          <><b>{run.found}</b> of {run.total} filled in.{missing?.length ? ` ${missing.length} still without one — HELM fills these in where it can.` : ''}</>
+        ) : (
+          <><b>{missing.length} label{missing.length !== 1 ? 's' : ''}</b> from the last 14 days have no tracking number.
+            <span className="text-ink/55"> Read them again to fill them in.</span></>
+        )}
+      </div>
+      {!busy && missing?.length > 0 && <button className="btn btn-secondary btn-sm" onClick={go}>Fill in tracking numbers</button>}
+    </div>
+  )
+}
 
 function UploadsList({ uploads, onOpenDay }) {
   if (!uploads.length) return <div className="surface"><EmptyState icon="upload" title="Nothing uploaded yet" /></div>

@@ -1,7 +1,7 @@
 // Reads HELM's orders into the portal, every minute (called by the database).
 //
-// Kept: each order's lines and what's in them, courier, channel, status and
-// dates. Never kept: anything about the customer — HELM sends names,
+// Kept: each order's lines and what's in them, courier, channel, status,
+// dates and tracking numbers. Never kept: anything about the customer — HELM sends names,
 // addresses, phones and emails with every order, and they're dropped here.
 // The HELM key lives in this function's secrets (HELM_API_TOKEN) and is never
 // sent anywhere but HELM.
@@ -60,6 +60,45 @@ function carrierOf(o: any) {
   return { carrier: svc?.courier?.friendly_courier_name || svc?.courier?.name || '', service: svc?.name || '' }
 }
 
+// ── Tracking numbers ─────────────────────────────────────────────────────────
+// Found by what the field is called rather than one fixed name, so it works
+// whichever way HELM nests it (on the order, its shipments or parcels).
+// Only field names are ever reported back, never values next to customer details.
+const TRACK_KEY = /(track|consign|awb|barcode|parcel_?(no|num|number|code))/i
+const NOT_TRACK_KEY = /(url|link|status|date|_at$|type|courier|carrier|service|provider|name)/i
+function findTracking(obj: any, path = '', out: { path: string, value: string }[] = [], depth = 0) {
+  if (obj == null || depth > 6) return out
+  if (Array.isArray(obj)) { obj.slice(0, 25).forEach(v => findTracking(v, `${path}[]`, out, depth + 1)); return out }
+  if (typeof obj !== 'object') return out
+  for (const [k, v] of Object.entries(obj)) {
+    // Products carry barcodes too (EANs): never look inside the order's items
+    if (/^(items|order_items|inventory|products?|lines)$/i.test(k)) continue
+    const p = path ? `${path}.${k}` : k
+    if ((typeof v === 'string' || typeof v === 'number') && TRACK_KEY.test(k) && !NOT_TRACK_KEY.test(k)
+        && !(/(^id$|_id$)/i.test(k) && !/track/i.test(k))) {
+      const val = String(v).trim().replace(/\s+/g, '')
+      if (/^[A-Z0-9][A-Z0-9-]{7,39}$/i.test(val) && /\d{4}/.test(val)) out.push({ path: p, value: val.toUpperCase() })
+    } else if (v && typeof v === 'object') findTracking(v, p, out, depth + 1)
+  }
+  return out
+}
+const uniq = <T,>(a: T[]) => [...new Set(a)]
+// The layout of a reply, as field names and types only — never the values
+function shapeOf(obj: any, path = '', out: string[] = [], depth = 0): string[] {
+  if (out.length > 120 || depth > 4 || obj == null) return out
+  if (Array.isArray(obj)) { out.push(`${path}[] (${obj.length})`); if (obj.length) shapeOf(obj[0], `${path}[]`, out, depth + 1); return out }
+  if (typeof obj !== 'object') return out
+  for (const [k, v] of Object.entries(obj)) {
+    const p = path ? `${path}.${k}` : k
+    if (v && typeof v === 'object') shapeOf(v, p, out, depth + 1)
+    else out.push(`${p}: ${v === null ? 'null' : typeof v}`)
+  }
+  return out
+}
+// Only a shipment that says it belongs to this order counts: a list that
+// ignored the filter must never hand one order another order's number
+const belongsTo = (x: any, id: number) => [x?.order_id, x?.order?.id, x?.orderId].some(v => v != null && Number(v) === id)
+
 const CHANNELS: Record<string, string> = { amazonsp: 'Amazon', amazon: 'Amazon', ebay: 'eBay', tiktok: 'TikTok', tiktokshop: 'TikTok', shopify: 'Shopify', woocommerce: 'WooCommerce', manual: 'Manual' }
 
 function toRow(o: any) {
@@ -99,7 +138,62 @@ function toRow(o: any) {
   }
 }
 
-async function sync() {
+/**
+ * Labelled orders' tracking numbers: first whatever is on the order itself,
+ * then — for those still without one — HELM's shipments for that order.
+ * Which fields and calls worked is kept in helm_sync.tracking_info.
+ */
+async function addTracking(orders: any[], info: any, maxLookups: number) {
+  const paths: Record<string, number> = info.paths || {}
+  const note = (found: { path: string }[], via: string) => found.forEach(f => { const k = `${via}:${f.path}`; paths[k] = (paths[k] || 0) + 1 })
+  for (const o of orders) {
+    const found = findTracking(o)
+    note(found, 'order')
+    o.__tracking = uniq(found.map(f => f.value))
+  }
+  // Ways to ask HELM for an order's shipments; the first that answers is remembered
+  const ways: [string, (id: number) => [string, Record<string, string | number>]][] = [
+    ['orders?includes=shipments', (id) => [`/orders/${id}`, { includes: 'shipments' }]],
+    ['shipments?order_id', (id) => ['/shipments', { order_id: id }]],
+    ['orders/{id}/shipments', (id) => [`/orders/${id}/shipments`, {}]],
+  ]
+  // A way counts as working once it has found a number; one that answers but
+  // never has one (20 tries) is dropped, so nothing is asked about every minute for ever
+  const tried: Record<string, string> = info.ways || {}
+  const empty: Record<string, number> = info.empty || {}
+  const usable = (name: string) => !tried[name] || tried[name] === 'ok' || tried[name] === 'answers'
+  let lookups = 0
+  for (const o of orders) {
+    if (o.__tracking.length || lookups >= maxLookups) continue
+    for (const [name, make] of ways) {
+      if (!usable(name)) continue
+      lookups++
+      try {
+        const [path, params] = make(Number(o.id))
+        const r = await helm(path, params)
+        let body = r?.data ?? r
+        if (Array.isArray(body)) body = body.filter((x: any) => belongsTo(x, Number(o.id)))
+        if (!info.shapes?.[name]) info.shapes = { ...(info.shapes || {}), [name]: shapeOf(r) }
+        const found = findTracking(body)
+        o.__checked = true                                     // HELM answered about this order
+        note(found, name)
+        if (found.length) { tried[name] = 'ok'; o.__tracking = uniq(found.map(f => f.value)); break }
+        empty[name] = (empty[name] || 0) + 1
+        tried[name] = tried[name] === 'ok' ? 'ok' : empty[name] >= 20 ? 'no tracking in it' : 'answers'
+      } catch (e) {
+        // Only a clear "no" (400, 404…) rules a way out; busy or down is tried again next time
+        if (e instanceof HelmError && e.status >= 400 && e.status < 500 && e.status !== 429) tried[name] = `HTTP ${e.status}`
+      }
+    }
+  }
+  info.empty = empty
+  info.paths = paths; info.ways = tried; info.lookups = lookups
+  info.with_tracking = orders.filter(o => o.__tracking.length).length
+  info.labelled = orders.length
+  info.at = new Date().toISOString()
+}
+
+async function sync(opts: { backfillDays?: number } = {}) {
   if (!TOKEN) throw new Error('HELM_API_TOKEN is not set in the function secrets')
   const started = Date.now()
   const seen = new Map<number, any>()
@@ -108,20 +202,37 @@ async function sync() {
   for (const status of ACTIVE) for (const o of await listAll({ status })) seen.set(Number(o.id), o)
 
   // 2. Labelled recently (HELM "Despatched"): may not be uploaded to the portal yet
-  const since = Date.now() - 36 * 3600_000
+  //    (a backfill reaches further back, for tracking numbers on labels already uploaded)
+  const back = Math.min(14, Math.max(0, Number(opts.backfillDays) || 0))
+  const since = Date.now() - (back ? back * 24 : 36) * 3600_000
+  const pages = back ? 12 : 2
   let recent: any[] = []
-  try { recent = await listAll({ status: 8, sort_by: 'despatched_at', sort_direction: 'desc' }, 2) }
-  catch { recent = await listAll({ status: 8, sort_by: 'updated_at', sort_direction: 'desc' }, 2).catch(() => []) }
+  try { recent = await listAll({ status: 8, sort_by: 'despatched_at', sort_direction: 'desc' }, pages) }
+  catch { recent = await listAll({ status: 8, sort_by: 'updated_at', sort_direction: 'desc' }, pages).catch(() => []) }
+  const labelled: any[] = []
   for (const o of recent) {
     const t = Date.parse(o.despatched_at || o.updated_at || '')
-    if (t && t >= since) seen.set(Number(o.id), o)
+    if (t && t >= since) { seen.set(Number(o.id), o); labelled.push(o) }
   }
 
+  // 2b. Their tracking numbers. Never allowed to stop the sync itself
+  const { data: syncRow } = await db.from('helm_sync').select('tracking_info').eq('id', 1).maybeSingle()
+  const info: any = { ...(syncRow?.tracking_info || {}) }
+  // Already found (or already looked for and HELM had none)
+  const known = new Set<number>()
+  const ids = labelled.map(o => Number(o.id))
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: have } = await db.from('helm_orders').select('id').in('id', ids.slice(i, i + 200)).not('tracking', 'is', null)
+    for (const r of have || []) known.add(Number(r.id))
+  }
+  try { await addTracking(labelled.filter(o => !known.has(Number(o.id))), info, back ? 300 : 15) }
+  catch (e) { info.error = String((e as Error)?.message || e).slice(0, 200) }
+
   // 3. Orders we were following that have dropped out of the lists: look each one up
-  const { data: known } = await db.from('helm_orders').select('id, status, closed_reason').is('closed_at', null)
+  const { data: following } = await db.from('helm_orders').select('id, status, closed_reason').is('closed_at', null)
   const { data: cleared } = await db.from('helm_orders').select('id').eq('closed_reason', 'cleared')
   const clearedIds = new Set((cleared || []).map(r => Number(r.id)))
-  const missing = (known || []).filter(k => !seen.has(Number(k.id)) && k.status !== 8).slice(0, 60)
+  const missing = (following || []).filter(k => !seen.has(Number(k.id)) && k.status !== 8).slice(0, 60)
   const gone: number[] = []
   for (const k of missing) {
     try {
@@ -139,9 +250,18 @@ async function sync() {
     if (error) throw new Error(`Saving orders: ${error.message}`)
   }
   if (gone.length) await db.from('helm_orders').update({ closed_at: new Date().toISOString(), closed_reason: 'gone' }).in('id', gone)
+  // Tracking saved on its own, only where found, so a quiet minute never blanks one already known
+  for (const o of labelled.filter(x => x.__tracking?.length || x.__checked)) {
+    await db.from('helm_orders').update({ tracking: o.__tracking || [] }).eq('id', Number(o.id))
+  }
   // Labelled orders that fell out of HELM's recent list stay as they are: they wait for their upload
 
-  return { fetched: rows.length, gone: gone.length, ms: Date.now() - started }
+  // Check the labels' tracking numbers against HELM's: verify, put right, or fill in
+  const { data: applied } = await db.rpc('dispatch_apply_helm_tracking', { p_days: Math.max(30, back) })
+  info.applied = applied || null
+  await db.from('helm_sync').update({ tracking_info: info }).eq('id', 1)
+
+  return { fetched: rows.length, gone: gone.length, tracking: { found: info.with_tracking, of: info.labelled, applied }, ms: Date.now() - started }
 }
 
 Deno.serve(async (req) => {
@@ -149,8 +269,10 @@ Deno.serve(async (req) => {
   const { data: real } = await db.rpc('notify_key')
   if (!key || !real || key !== real) return json({ error: 'Not allowed' }, 403)
   const now = new Date().toISOString()
+  let body: any = {}
+  try { body = await req.json() } catch { /* the minute-by-minute call sends nothing */ }
   try {
-    const r = await sync()
+    const r = await sync({ backfillDays: body?.backfill_days })
     await db.from('helm_sync').update({ last_run: now, last_ok: new Date().toISOString(), last_error: null, fetched: r.fetched, ms: r.ms }).eq('id', 1)
     return json({ ok: true, ...r })
   } catch (e) {
