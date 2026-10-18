@@ -194,6 +194,26 @@ async function addTracking(orders: any[], info: any, maxLookups: number) {
     catch (e) { info.shapes = { ...(info.shapes || {}), 'shipments (latest)': [String((e as Error)?.message || e).slice(0, 160)] } }
     if (orders[0]) info.shapes = { ...(info.shapes || {}), 'labelled order': shapeOf(orders[0]) }
   }
+  // Once more: what a shipment can be asked to include, its full view, and
+  // whether the order_id filter works on an order known to have a shipment
+  if (!info.probed2) {
+    info.probed2 = new Date().toISOString()
+    const tracky = (lines: string[]) => lines.filter(l => /track|consign|barcode|parcel|label|package/i.test(l)).slice(0, 40)
+    const p2: any = {}
+    for (const inc of ['parcels', 'packages', 'labels', 'shipmentParcels', 'consignments', 'trackings']) {
+      try { const r = await helm('/shipments', { per_page: 1, includes: inc }); p2[`includes=${inc}`] = tracky(shapeOf(r)) }
+      catch (e) { p2[`includes=${inc}`] = e instanceof HelmError ? `HTTP ${e.status}` : 'failed' }
+    }
+    try {
+      const first = (await helm('/shipments', { per_page: 1 }))?.data?.[0]
+      if (first?.id) { try { p2['shipments/{id}'] = tracky(shapeOf(await helm(`/shipments/${first.id}`))) } catch (e) { p2['shipments/{id}'] = e instanceof HelmError ? `HTTP ${e.status}` : 'failed' } }
+      if (first?.order_id) {
+        try { p2['order_id filter on a known shipment'] = ((await helm('/shipments', { order_id: first.order_id }))?.data || []).length } catch (e) { p2['order_id filter on a known shipment'] = e instanceof HelmError ? `HTTP ${e.status}` : 'failed' }
+      }
+    } catch (e) { p2.error = String((e as Error)?.message || e).slice(0, 160) }
+    p2['labelled orders with a HELM shipment'] = `${orders.filter(o => o.active_shipment_exists).length} of ${orders.length}`
+    info.probe2 = p2
+  }
   info.empty = empty
   info.paths = paths; info.ways = tried; info.lookups = lookups
   info.with_tracking = orders.filter(o => o.__tracking.length).length
