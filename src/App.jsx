@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react'
 import { EMPTY_CALC } from './lib/defaults'
 import { VERSION, BUILD_TIME } from './version'
+import { watchForUpdates, applyUpdate, busy, loadPage } from './lib/updates'
 import { parseHeliumExport } from './lib/hunter'
 import { heliumDateFromFile } from './lib/hunts'
 import { feeProposals, listProposals, cheaperSupplierProposals, rowsFromCatalogue, carrierProposals, supplierForName, purchaseCostProposals } from './lib/proposals'
@@ -82,7 +83,7 @@ PAGE_MODULES.issues = PAGE_MODULES.payments
 PAGE_MODULES['dispatch-dashboard'] = PAGE_MODULES.dispatch
 const prefetchPage = (id) => { PAGE_MODULES[id]?.().catch(() => {}) }
 
-const lazyPage = (id, name = 'default') => lazy(() => PAGE_MODULES[id]().then(m => ({ default: m[name] })))
+const lazyPage = (id, name = 'default') => lazy(() => loadPage(PAGE_MODULES[id]).then(m => ({ default: m[name] })))
 const CalculatorPage = lazyPage('calculator')
 const DashboardPage = lazyPage('dashboard')
 const SavedPage = lazyPage('saved')
@@ -113,10 +114,10 @@ const ArchivePage = lazyPage('archive')
 const SettingsPage = lazyPage('settings')
 const TeamPage = lazyPage('team')
 const NotificationsPage = lazyPage('notifications')
-const PurchaseOrderDrawer = lazy(() => import('./components/PurchaseOrderDrawer'))
-const PoBuilder = lazy(() => import('./components/PoBuilder'))
-const AttachDocuments = lazy(() => import('./components/AttachDocuments'))
-const AddCompany = lazy(() => import('./components/AddCompany'))
+const PurchaseOrderDrawer = lazy(() => loadPage(() => import('./components/PurchaseOrderDrawer')))
+const PoBuilder = lazy(() => loadPage(() => import('./components/PoBuilder')))
+const AttachDocuments = lazy(() => loadPage(() => import('./components/AttachDocuments')))
+const AddCompany = lazy(() => loadPage(() => import('./components/AddCompany')))
 
 const Spinner = () => (
   <div className="flex items-center justify-center h-64" role="status" aria-label="Loading">
@@ -246,6 +247,9 @@ export default function App() {
   const [profiles, setProfiles] = useState([])
   const [loading, setLoading] = useState(true)
   const [toast, setToast] = useState(null)
+  // A newer release than the one running (phones keep the portal open for days)
+  const [update, setUpdate] = useState(null)
+  useEffect(() => watchForUpdates(setUpdate), [])
   // Browsers discard background tabs to save memory and reload them on return.
   // We can't stop that, so we keep in-progress work in sessionStorage and put
   // it straight back — a reload becomes invisible instead of destructive.
@@ -2686,8 +2690,18 @@ export default function App() {
         <DispatchJobsPill onOpen={() => navigateTo('dispatch')} showToast={showToast} />
       )}
       </Suspense>
+      {update && (
+        <div className="fixed bottom-3 left-3 right-3 sm:left-auto sm:bottom-5 sm:right-5 z-50 sm:max-w-md px-4 py-3 rounded-[6px] bg-royal-600 text-white shadow-modal flex items-center gap-3" role="status">
+          <Icon name="sparkles" size={18} className="shrink-0" />
+          <span className="flex-1 min-w-0 text-sm leading-snug"><b>New version ready</b>{update.version ? ` (v${update.version})` : ''}. Update to get the latest changes.</span>
+          <button className="shrink-0 px-3 py-2 rounded-[5px] bg-white text-royal-700 text-sm font-semibold"
+            onClick={() => { if (!busy() || window.confirm('Something is still in progress here (a file being read or a form open). Update anyway?')) applyUpdate() }}>
+            Update
+          </button>
+        </div>
+      )}
       {toast && (
-        <div className={`fixed bottom-3 left-3 right-3 sm:left-auto sm:bottom-5 sm:right-5 z-50 px-4 py-3 rounded-[5px] text-sm font-medium shadow-modal sm:max-w-md flex items-center justify-between gap-4
+        <div className={`fixed ${update ? 'bottom-[5.5rem]' : 'bottom-3'} left-3 right-3 sm:left-auto ${update ? 'sm:bottom-24' : 'sm:bottom-5'} sm:right-5 z-50 px-4 py-3 rounded-[5px] text-sm font-medium shadow-modal sm:max-w-md flex items-center justify-between gap-4
           ${toast.type === 'error' ? 'bg-loss text-white' : 'bg-ink text-white'}`} role={toast.type === 'error' ? 'alert' : 'status'}>
           <span>{toast.msg}</span>
           {toast.action && (

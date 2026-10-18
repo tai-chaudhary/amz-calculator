@@ -3,6 +3,20 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.34.0 — 18 Oct 2026
+- Phones get new releases. The portal saved to a home screen stays open in the background for days
+  and kept running whatever version it started with. Now every release publishes /version.json,
+  and the portal checks it when it's opened, when it comes back to the front and every 5 minutes:
+  - a newer release shows a "New version ready · Update" bar
+  - if the phone was put away for 10 minutes or more and nothing is half done (a file being read,
+    an upload waiting for review, a form open), it updates itself as soon as it's opened again
+- After a release, a page that hadn't been opened yet failed to load (its old file is gone). It now
+  reloads onto the new release instead
+- Home screen: the portal opens full screen like an app, with its own icon (Good & General on the
+  brand blue) and name "G&G Ops". Phones that added it before need to remove it and add it again
+  to get this
+- vercel.json: index.html, version.json and the manifest are never served from an old copy
+
 ## v2.33.0 — 18 Oct 2026
 - New Orders: a new "All open" list shows every order HELM hasn't shipped in one place: new,
   processing, picking, picked, packing, sorted, labelled but not uploaded, back orders and holds.
