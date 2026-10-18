@@ -1834,6 +1834,7 @@ function FindReprint({ me, cutoff, showToast, onLog, onChanged, onReprint, peopl
   const [results, setResults] = useState(null)
   const [searching, setSearching] = useState(false)
   const [reprinting, setReprinting] = useState(null)
+  const [viewing, setViewing] = useState(null)
   const timer = useRef(null)
 
   useEffect(() => {
@@ -1886,9 +1887,14 @@ function FindReprint({ me, cutoff, showToast, onLog, onChanged, onReprint, peopl
                     : l.status === 'cancelled' ? <StatusBadge tone="quiet">Cancelled</StatusBadge>
                     : late ? <StatusBadge tone="alert" dot>Delayed</StatusBadge>
                     : <StatusBadge tone="brand" dot>{l.printed_at ? 'Printed' : 'Not printed'}</StatusBadge>}
-                  {l.status !== 'cancelled' && l.batch && (
-                    <button className="btn btn-primary btn-sm" onClick={() => setReprinting(l)}><Icon name="printer" size={14} /> Reprint</button>
-                  )}
+                  <div className="flex gap-2">
+                    {l.batch?.upload?.storage_path && (
+                      <button className="btn btn-secondary btn-sm" onClick={() => setViewing(l)}><Icon name="eye" size={14} /> View label</button>
+                    )}
+                    {l.status !== 'cancelled' && l.batch && (
+                      <button className="btn btn-primary btn-sm" onClick={() => setReprinting(l)}><Icon name="printer" size={14} /> Reprint</button>
+                    )}
+                  </div>
                 </div>
               </div>
             )
@@ -1896,6 +1902,20 @@ function FindReprint({ me, cutoff, showToast, onLog, onChanged, onReprint, peopl
         </div>
       )}
 
+      {viewing && (
+        <Modal title={`${viewing.batch?.code} · label ${viewing.seq} of ${viewing.batch?.label_count}`} maxWidth="max-w-lg"
+          description={[viewing.channel_ref || viewing.helm_order, viewing.tracking].filter(Boolean).join(' · ')} onClose={() => setViewing(null)}>
+          <LabelImage label={viewing} />
+          <div className="flex gap-2 pt-4">
+            <button className="btn btn-secondary flex-1 justify-center" onClick={() => setViewing(null)}>Close</button>
+            {viewing.status !== 'cancelled' && viewing.batch && (
+              <button className="btn btn-primary flex-1 justify-center" onClick={() => { const l = viewing; setViewing(null); setReprinting(l) }}>
+                <Icon name="printer" size={14} /> Reprint this
+              </button>
+            )}
+          </div>
+        </Modal>
+      )}
       {reprinting && (
         <ReprintModal label={reprinting} me={me} people={people} showToast={showToast} onLog={onLog} onReprint={onReprint}
           onClose={() => setReprinting(null)} onDone={() => { setReprinting(null); refresh() }} />
@@ -1922,6 +1942,7 @@ function ReprintModal({ label, me, people = [], showToast, onLog, onReprint, onC
   }
   return (
     <Modal title="Reprint this label" description={`${label.batch?.code} · label ${label.seq} of ${label.batch?.label_count}`} onClose={onClose}>
+      {label.batch?.upload?.storage_path && <LabelImage label={label} compact className="mb-4" />}
       <div className="card mb-4">
         <div className="text-lg font-semibold text-ink">{label.label_name}</div>
         <div className="text-sm text-ink/70">{itemsText(label.items)}</div>
@@ -1956,6 +1977,44 @@ function ReprintModal({ label, me, people = [], showToast, onLog, onReprint, onC
         <button className="btn btn-primary flex-1" disabled={busy || !person} onClick={go}><Icon name="printer" size={14} /> {busy ? 'Building…' : person ? `Print 1 label · ${person}` : 'Choose who\'s printing'}</button>
       </div>
     </Modal>
+  )
+}
+
+// ── A label as it prints ─────────────────────────────────────────────────────
+
+const labelFiles = new Map()   // upload file → its bytes, so looking at a few labels downloads it once
+const labelImages = new Map()  // label id → picture
+
+/**
+ * The label exactly as a reprint comes out — the HELM label with the product
+ * stamped on it — built the same way printing builds it, then shown as a picture.
+ */
+function LabelImage({ label, compact = false, className = '' }) {
+  const [src, setSrc] = useState(labelImages.get(label.id) || null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    if (labelImages.has(label.id)) return
+    let gone = false
+    ;(async () => {
+      try {
+        const path = label.batch?.upload?.storage_path
+        if (!labelFiles.has(path)) labelFiles.set(path, downloadDispatchFile(path))
+        const fileBytes = await labelFiles.get(path)
+        const bytes = await buildPrintFile([{ batch: label.batch, labels: [label], fileBytes }], { cover: false })
+        const [img] = await pagesAsImages(bytes, [0], compact ? 1.2 : 1.8)
+        if (!img) throw new Error('Nothing to show')
+        labelImages.set(label.id, img)
+        if (!gone) setSrc(img)
+      } catch (e) { if (!gone) setError(e?.message || 'Couldn’t show the label') }
+    })()
+    return () => { gone = true }
+  }, [label.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className={`rounded-[6px] border border-rule bg-white overflow-hidden flex items-center justify-center ${compact ? 'max-h-72' : 'min-h-[18rem]'} ${className}`}>
+      {src ? <img src={src} alt={`Label ${label.seq} — ${label.label_name || ''}`} className={`w-full object-contain ${compact ? 'max-h-72' : 'max-h-[70dvh]'}`} />
+        : error ? <div className="px-4 py-10 text-sm text-loss text-center">{error}</div>
+        : <div className="py-10"><Spinner /><div className="text-xs text-ink/45 text-center -mt-6">Building the label…</div></div>}
+    </div>
   )
 }
 

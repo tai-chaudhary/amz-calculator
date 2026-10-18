@@ -30,7 +30,8 @@ function linesOf(orders, stampOf) {
     if (!byStamp.has(s)) byStamp.set(s, { stamp: s, orders: [], items: o.items })
     byStamp.get(s).orders.push(o)
   }
-  return [...byStamp.values()].sort((a, b) =>
+  // Most orders first; lines with the same number stay in product order
+  return [...byStamp.values()].sort((a, b) => b.orders.length - a.orders.length ||
     sortKey({ carrier: a.orders[0].carrier, label_name: a.stamp, items: a.items })
       .localeCompare(sortKey({ carrier: b.orders[0].carrier, label_name: b.stamp, items: b.items })))
 }

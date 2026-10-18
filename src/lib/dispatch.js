@@ -273,6 +273,25 @@ export function suggestLabelName(items = []) {
  * Who the label is for and what it says: carrier, service, the reference
  * HELM put on it (the channel order number), the tracking number and postcode.
  */
+/**
+ * Evri's tracking number, e.g. H-08AN-A-000000862-4. Since mid-October HELM's
+ * Evri labels are pictures, and recognised text gets this slightly wrong:
+ * spaces round the dashes, a long dash or "=", O for 0, I or L for 1. The
+ * shape is fixed, so it's found by shape and the digits put right.
+ */
+export function evriTracking(text) {
+  const up = String(text || '').toUpperCase().replace(/[—–_]/g, '-')
+  const strict = up.match(/\b(T\d{2}[A-Z0-9]{10,}|H-[A-Z0-9]{2,4}-[A-Z0-9]-\d{6,}-\d)\b/)
+  if (strict) return strict[1]
+  const sep = '\\s*[-~=.]\\s*'
+  const loose = up.match(new RegExp(`\\bH${sep}([0-9OQDIL]{2})\\s*([A-Z0-9]{2})${sep}([A-Z0-9])${sep}([0-9OQDILSB ]{6,14})${sep}([0-9OQDILSB])(?![A-Z0-9])`))
+  if (!loose) return ''
+  const digits = (x) => x.replace(/\s+/g, '').replace(/[OQD]/g, '0').replace(/[IL]/g, '1').replace(/S/g, '5').replace(/B/g, '8')
+  const run = digits(loose[4])
+  if (!/^\d{6,12}$/.test(run)) return ''
+  return `H-${digits(loose[1])}${loose[2]}-${loose[3]}-${run}-${digits(loose[5])}`
+}
+
 export function parseLabel(page) {
   const t = pageText(page)
   const up = t.toUpperCase().replace(/[—–]/g, '-')
@@ -316,8 +335,7 @@ export function parseLabel(page) {
   out.ref = out.refs[0] || ''
 
   const dhlShip = up.match(/SHIPMENT\s*NO\s*[:.]?\s*(\d{10,})/)
-  const evriTrack = up.match(/\b(T\d{2}[A-Z0-9]{10,}|H-[A-Z0-9]{2,4}-[A-Z0-9]-\d{6,}-\d)\b/)
-  out.tracking = dhlShip ? dhlShip[1] : evriTrack ? evriTrack[1] : ''
+  out.tracking = dhlShip ? dhlShip[1] : evriTracking(up)
 
   // Evri prints the address under "Destination"; that's the customer
   // (read by position, so the routing codes beside it don't get mixed in)

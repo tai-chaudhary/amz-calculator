@@ -3,6 +3,16 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.31.3 — 18 Oct 2026
+- New Orders: lines with the most orders come first
+- Find & reprint: "View label" shows the label exactly as it prints, the HELM label with the product
+  stamped on it, with "Reprint this" underneath. The reprint window shows the same picture
+- Evri tracking numbers: since 15 Oct HELM's Evri labels have been pictures, and the tracking
+  number (H-08AN-A-000000837-1) read from them was usually slightly off (spaces, long dashes,
+  O for 0, I for 1), so it wasn't saved: 27 of 583 Evri labels had one, against 113 of 115 for DHL.
+  It's now read enlarged and the usual misreads are put right. Labels already uploaded keep what
+  they had
+
 ## v2.31.2 — 18 Oct 2026
 - Fix: the "…" button on each batch opened an empty white box (the menu was cut off by the card's
   edge). Its options are now buttons on the card: Substitute, and Print again once it's all printed

@@ -676,6 +676,18 @@ test('labels: Evri read from the PDF, DHL from recognised text', async () => {
   assert.equal(d.tracking, '60120262962422')
 })
 
+test('Evri tracking read from a picture label: misread characters put right', async () => {
+  const { evriTracking, parseLabel } = await import('../src/lib/dispatch.js')
+  assert.equal(evriTracking('H-08AN-A-000000862-4'), 'H-08AN-A-000000862-4')
+  assert.equal(evriTracking('C-ROUND 2997\nH - 08AN - A - 000000837 - 1'), 'H-08AN-A-000000837-1', 'spaces round the dashes')
+  assert.equal(evriTracking('H—O8AN—A—0000OO837—I'), 'H-08AN-A-000000837-1', 'long dashes, O for 0, I for 1')
+  assert.equal(evriTracking('H=08AN=A=000 000 837=1'), 'H-08AN-A-000000837-1', 'equals signs and a split number')
+  assert.equal(evriTracking('VAN A1 DROP 27 C-ROUND 2997'), '', 'nothing like a tracking number')
+  assert.equal(evriTracking('H-08AN-A-0000ABC37-1'), '', 'letters inside the number are not guessed at')
+  const e = parseLabel({ items: [], ocr: 'ADRIAN MARSH LIMITED EVRI\nNDAY\nDestination\nReference 1 OR-23D2BF35\nH - O8AN - A - 000000837 - 1' })
+  assert.equal(e.carrier, 'Evri'); assert.equal(e.tracking, 'H-08AN-A-000000837-1')
+})
+
 test('item keys ignore order, case and the dashes line-wrapping loses', async () => {
   const { itemKey } = await import('../src/lib/dispatch.js')
   assert.equal(itemKey([{ code: 'A-1', qty: 1 }, { code: 'b2', qty: 2 }]), itemKey([{ code: 'B2', qty: 2 }, { code: 'A1', qty: 1 }]))

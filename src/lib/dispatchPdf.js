@@ -53,6 +53,14 @@ function crop(src, x0, y0, x1, y1) {
   c.getContext('2d').drawImage(src, Math.floor(src.width * x0), Math.floor(src.height * y0), c.width, c.height, 0, 0, c.width, c.height)
   return c
 }
+function grow(src, f) {
+  const c = document.createElement('canvas')
+  c.width = Math.floor(src.width * f); c.height = Math.floor(src.height * f)
+  const ctx = c.getContext('2d')
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(src, 0, 0, c.width, c.height)
+  return c
+}
 function shrink(src, f) {
   const c = document.createElement('canvas')
   c.width = Math.floor(src.width * f); c.height = Math.floor(src.height * f)
@@ -73,7 +81,8 @@ async function readPictureLabel(canvas, page) {
     const [service, address, tracking] = await Promise.all([
       ocrText(crop(canvas, 0, 0.34, 1, 0.45)),
       ocrText(crop(canvas, 0, 0.43, 0.6, 0.85)),
-      ocrText(crop(canvas, 0, 0.86, 1, 1)),
+      // The tracking number is small print under the barcode: read it enlarged
+      ocrText(grow(crop(canvas, 0, 0.82, 1, 1), 2)),
     ])
     page.ocr = [top, service, address, tracking].join('\n')
     page.ocrService = service
