@@ -145,3 +145,5 @@ export function landingPage(me) {
 export const WAREHOUSE_ONLY = ['dispatch', 'dispatch-dashboard', 'requests', 'goods-in', 'inventory', 'tasks', 'tracking', 'link-codes']
 export const seesCosts = (me) => !!me && me.active !== false &&
   (me.role === 'admin' || (Array.isArray(me.permissions) && me.permissions.some(p => !WAREHOUSE_ONLY.includes(p))))
+/** The office: approves new products and owns every product's name and SKU (public.can_approve_products()) */
+export const canApproveProducts = (me) => seesCosts(me) || canDo(me, 'link-codes')

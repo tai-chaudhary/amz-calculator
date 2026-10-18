@@ -9,7 +9,9 @@ import {
   AISLES, baysIn, parseLocation, byLocation, shelfLabel, cleanLocation, stockState, STATE_LABEL, needsRestock,
   fmtUnits, fmtDays, matchesProduct, MOVEMENT_LABEL, requestPrefill,
 } from '../lib/inventory'
-import { loadMovements, loadProductOrders, loadDespatchDays, invSaveLocation, invSaveProduct, invAssign, loadCodesToVerify } from '../lib/db'
+import { loadMovements, loadProductOrders, loadDespatchDays, invSaveLocation, invSaveProduct, invAssign, loadCodesToVerify, invApproveProduct } from '../lib/db'
+import { canApproveProducts } from '../lib/access'
+import { stampName } from '../lib/dispatch'
 
 // HELM orders not uploaded to Dispatch yet
 const ORDER_PHASE = { new: 'new order in HELM', labelled: 'labelled, not uploaded', backorder: 'back order in HELM', hold: 'on hold in HELM' }
@@ -21,6 +23,7 @@ const addDays = (ymd, n) => { const d = new Date(`${ymd}T12:00:00Z`); d.setUTCDa
 
 const FILTERS = [
   { id: 'all', label: 'All' },
+  { id: 'verify', label: 'Office to verify', test: (p) => p.status === 'pending', hideEmpty: true },
   { id: 'restock', label: 'Need ordering', test: (p) => needsRestock(p.st) },
   { id: 'pick', label: 'Pick shelf low', test: (p, tasks) => tasks.some(t => t.product_id === p.id && t.status === 'open') },
   { id: 'helm', label: 'Not in HELM', test: (p) => !p.in_helm },
@@ -84,8 +87,8 @@ export default function InventoryPage({ me, inventory, people = [], focusId, off
   const openTasks = tasks.filter(t => t.status === 'open').length
 
   const open = products.find(p => p.id === openId)
-  const filters = FILTERS.filter(f => office || !f.office)
   const counts = Object.fromEntries(FILTERS.map(f => [f.id, f.test ? products.filter(p => f.test(p, tasks)).length : products.length]))
+  const filters = FILTERS.filter(f => (office || !f.office) && (!f.hideEmpty || counts[f.id] > 0 || filter === f.id))
   const VIEWS = [
     { id: 'stock', label: 'Stock', count: null },
     { id: 'shelves', label: 'Shelves', count: null },
@@ -137,7 +140,7 @@ export default function InventoryPage({ me, inventory, people = [], focusId, off
 
           {/* Stays in view on phones while scrolling the list, under the top bar */}
           <div className="flex gap-3 flex-wrap items-center justify-between mb-3 sticky top-14 lg:static z-[5] -mx-4 px-4 sm:-mx-7 sm:px-7 py-2 lg:mx-0 lg:px-0 lg:py-0 bg-paper/95 backdrop-blur-sm lg:bg-transparent lg:backdrop-blur-none">
-            <SearchInput value={search} onChange={e => setSearch(e.target.value)} placeholder="Product, code or shelf" className="w-full sm:w-80" autoFocus={false}
+            <SearchInput value={search} onChange={e => setSearch(e.target.value)} placeholder="Product, SKU or shelf" className="w-full sm:w-80" autoFocus={false}
               type="search" enterKeyHint="search" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Search stock" />
             <div className="flex gap-2 items-center">
               <label className="text-xs text-ink/50" htmlFor="inv-sort">Sort</label>
@@ -190,7 +193,7 @@ export default function InventoryPage({ me, inventory, people = [], focusId, off
                       <tr key={p.id} className="cursor-pointer" onClick={() => setOpenId(p.id)}>
                         <td className="max-w-[320px]">
                           <div className="text-ink font-medium leading-snug">{p.name}</div>
-                          <div className="text-xs text-ink/45 tabular-nums flex items-center gap-1.5 mt-0.5">{p.code} <HelmFlag p={p} /></div>
+                          <div className="text-xs flex items-center gap-1.5 mt-0.5 flex-wrap"><Sku code={p.code} /> <PendingFlag p={p} /> <HelmFlag p={p} /></div>
                         </td>
                         <td className="text-xs tabular-nums"><ShelfList p={p} /></td>
                         <td className={`text-right tabular-nums ${p.on_hand < 0 ? 'text-loss' : ''}`}>{fmtUnits(p.on_hand)}</td>
@@ -253,6 +256,59 @@ export default function InventoryPage({ me, inventory, people = [], focusId, off
   )
 }
 
+/** A product's SKU: there to read and search by, without shouting */
+export function Sku({ code }) {
+  if (!code) return null
+  return <span className="font-mono text-[11px] text-ink/40 tracking-tight break-all"><span className="text-ink/30">SKU</span> {code}</span>
+}
+
+function PendingFlag({ p }) {
+  if (p.status !== 'pending') return null
+  return <StatusBadge tone="alert">Office to verify</StatusBadge>
+}
+
+/** A product the warehouse added: the office checks its name, gives it its SKU and stamp name */
+const suggestSku = (name) => String(name || '').toUpperCase().replace(/&/g, ' AND ').replace(/[^A-Z0-9.]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+
+function PendingPanel({ p, me, showToast, onDone }) {
+  const office = canApproveProducts(me)
+  const [f, setF] = useState({ name: p.name, code: p.code?.startsWith('NEW-') ? suggestSku(p.name) : p.code, stamp: p.stamp_name || '' })
+  const [checked, setChecked] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const approve = async () => {
+    setBusy(true)
+    try {
+      await invApproveProduct(p.id, f.code.trim().toUpperCase(), f.name.trim(), f.stamp.trim(), me?.name)
+      showToast?.(`${f.name.trim()} is live`); onDone?.()
+    } catch (e) { showToast?.(e.message, 'error') } finally { setBusy(false) }
+  }
+  const asked = [p.requested_by && `Added by ${p.requested_by}`, p.requested_at && when(p.requested_at)].filter(Boolean).join(' · ')
+  if (!office) return (
+    <div className="text-sm px-3 py-2.5 rounded-[6px] bg-warn/10 border border-warn/30 text-ink/80">
+      <b>Office to verify.</b> The office checks the name and gives it its SKU. Until then its stock counts as normal{asked && <span className="text-ink/50"> · {asked}</span>}.
+    </div>
+  )
+  const code = f.code.trim().toUpperCase()
+  return (
+    <div className="rounded-[6px] bg-warn/5 border border-warn/30 p-3 space-y-2.5">
+      <div className="text-sm text-ink/80"><b>New product — check it before it goes live.</b>{asked && <span className="text-ink/50"> {asked}.</span>}
+        <div className="text-xs text-ink/55 mt-0.5">Item codes can only be linked to it once it’s live.</div></div>
+      <div><label className="label" htmlFor="pp-name">Name, spelled as it should be</label>
+        <input id="pp-name" className="input text-base sm:text-sm" value={f.name} onChange={e => setF(x => ({ ...x, name: e.target.value }))} /></div>
+      <div><label className="label" htmlFor="pp-code">SKU</label>
+        <input id="pp-code" className="input text-base sm:text-sm font-mono uppercase" value={f.code} onChange={e => setF(x => ({ ...x, code: e.target.value }))} autoCapitalize="characters" autoCorrect="off" spellCheck={false} />
+        {code.startsWith('NEW-') && <div className="text-xs text-loss mt-1">Give it its real SKU — NEW-… is only a placeholder.</div>}</div>
+      <div><label className="label" htmlFor="pp-stamp">Stamp name <span className="text-ink/40 font-normal">(what goes on the label — empty to use the name)</span></label>
+        <input id="pp-stamp" className="input text-base sm:text-sm uppercase" value={f.stamp} onChange={e => setF(x => ({ ...x, stamp: e.target.value }))} placeholder={stampName(f.name)} />
+        <div className="text-xs text-ink/50 mt-1">Label reads: <span className="font-mono">1 X {stampName(f.stamp || f.name)}</span></div></div>
+      <label className="flex items-start gap-2 text-sm"><input type="checkbox" className="mt-0.5" checked={checked} onChange={e => setChecked(e.target.checked)} />
+        I’ve checked the name and SKU against the product</label>
+      <button className="btn btn-primary w-full justify-center py-3 sm:py-2" disabled={busy || !checked || !f.name.trim() || !code || code.startsWith('NEW-')} onClick={approve}>
+        {busy ? 'Approving…' : 'Approve — make it live'}</button>
+    </div>
+  )
+}
+
 function StateBadge({ p }) {
   const s = STATE_LABEL[p.st.state]
   if (!s || p.st.state === 'ok') return null
@@ -278,7 +334,7 @@ function ProductCard({ p, office, onOpen }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="font-semibold text-ink leading-snug">{p.name}</div>
-          <div className="text-xs text-ink/45 tabular-nums mt-0.5">{p.code}</div>
+          <div className="mt-0.5"><Sku code={p.code} /></div>
         </div>
         <div className="text-right shrink-0">
           <div className={`text-xl font-semibold tabular-nums ${p.available <= 0 ? 'text-loss' : 'text-ink'}`}>{fmtUnits(p.available)}</div>
@@ -287,7 +343,7 @@ function ProductCard({ p, office, onOpen }) {
       </div>
       <div className="flex items-center justify-between gap-2 mt-2">
         <div className="text-xs tabular-nums"><ShelfList p={p} max={2} /></div>
-        <div className="flex gap-1 flex-wrap justify-end"><HelmFlag p={p} /><StateBadge p={p} /></div>
+        <div className="flex gap-1 flex-wrap justify-end"><PendingFlag p={p} /><HelmFlag p={p} /><StateBadge p={p} /></div>
       </div>
       {(p.open_orders > 0 || p.st.cover != null) && (
         <div className="text-xs text-ink/50 mt-1.5">
@@ -314,7 +370,7 @@ function ProductDrawer({ p, me, people, office, canEdit, locations, stockItems, 
   const s = p.st
 
   return (
-    <Drawer title={p.name} description={<span className="tabular-nums">{p.code}</span>} onClose={onClose}
+    <Drawer title={p.name} description={<Sku code={p.code} />} onClose={onClose}
       footer={canEdit && (
         <div className={`grid ${office ? 'grid-cols-4' : 'grid-cols-3'} gap-2`}>
           <button className="btn btn-secondary justify-center py-3 sm:py-2" onClick={() => onChange({ mode: 'move' })}>Move</button>
@@ -327,7 +383,8 @@ function ProductDrawer({ p, me, people, office, canEdit, locations, stockItems, 
         </div>
       )}>
       <div className="space-y-5">
-        {!p.in_helm && (
+        {p.status === 'pending' && <PendingPanel p={p} me={me} showToast={showToast} onDone={onRefresh} />}
+        {!p.in_helm && p.status !== 'pending' && (
           <div className="text-sm px-3 py-2.5 rounded-[6px] bg-warn/10 border border-warn/30 text-ink/80">
             Not in HELM yet. Create it there with the code <b className="tabular-nums">{p.code}</b> so its orders take stock off automatically.
           </div>
@@ -469,8 +526,10 @@ const Row = ({ label, value }) => (
 )
 
 function ProductSettings({ p, me, office, stockItems, showToast, onClose, onSaved }) {
+  // Only the office changes a name or SKU: verified item codes and stamps hang off them
+  const owns = canApproveProducts(me)
   const [f, setF] = useState({
-    name: p.name, code: p.code, in_helm: p.in_helm, min_pick: p.min_pick ?? '', daily_override: p.daily_override ?? '',
+    name: p.name, code: p.code, stamp_name: p.stamp_name || '', in_helm: p.in_helm, min_pick: p.min_pick ?? '', daily_override: p.daily_override ?? '',
     override_until: p.override_until || '', lead_days: p.lead_days ?? '', note: p.note || '', stock_item_id: p.stock_item_id || '',
   })
   const [busy, setBusy] = useState(false)
@@ -480,15 +539,23 @@ function ProductSettings({ p, me, office, stockItems, showToast, onClose, onSave
     try {
       const out = { ...f }
       if (!office) delete out.stock_item_id
+      if (!owns) { delete out.name; delete out.code; delete out.stamp_name }
       await invSaveProduct(p.id, out, me?.name)
       showToast?.('Saved'); onSaved()
     } catch (e) { showToast?.(e.message, 'error'); setBusy(false) }
   }
   return (
     <div className="card p-3.5 space-y-3">
-      <div><label className="label" htmlFor="ps-name">Name</label><input id="ps-name" className="input" value={f.name} onChange={set('name')} /></div>
+      <div><label className="label" htmlFor="ps-name">Name</label><input id="ps-name" className="input" value={f.name} onChange={set('name')} disabled={!owns} /></div>
+      {!owns && <div className="text-xs text-ink/45 -mt-1">Only the office changes a product’s name or SKU.</div>}
+      {owns && p.status !== 'pending' && (
+        <div><label className="label" htmlFor="ps-stamp">Stamp name <span className="text-ink/40 font-normal">(empty to use the name)</span></label>
+          <input id="ps-stamp" className="input uppercase" value={f.stamp_name} onChange={set('stamp_name')} placeholder={stampName(f.name)} />
+          <div className="text-xs text-ink/50 mt-1">Label reads: <span className="font-mono">1 X {stampName(f.stamp_name || f.name)}</span></div></div>
+      )}
+      {owns && f.code.trim().toUpperCase() !== p.code && <div className="text-xs text-warn">Changing the SKU moves every verified item code with it. It’s logged.</div>}
       <div className="grid grid-cols-2 gap-2">
-        <div><label className="label" htmlFor="ps-code">HELM code</label><input id="ps-code" className="input tabular-nums" value={f.code} onChange={set('code')} /></div>
+        <div><label className="label" htmlFor="ps-code">SKU</label><input id="ps-code" className="input font-mono text-sm uppercase" value={f.code} onChange={set('code')} disabled={!owns || p.status === 'pending'} /></div>
         <label className="flex items-center gap-2 text-sm mt-6"><input type="checkbox" checked={f.in_helm} onChange={set('in_helm')} /> It’s in HELM</label>
       </div>
       <div className="grid grid-cols-2 gap-2">
@@ -679,7 +746,7 @@ function ShelfDrawer({ code, me, people, office, canEdit, locations, products, s
               <div key={p.id} className="px-3 py-2.5 flex items-center gap-2">
                 <button className="text-left min-w-0 flex-1" onClick={() => onOpenProduct(p.id)}>
                   <div className="text-sm text-ink truncate">{p.name}</div>
-                  <div className="text-xs text-ink/45 tabular-nums">{p.code}</div>
+                  <div><Sku code={p.code} /></div>
                 </button>
                 <span className={`tabular-nums font-semibold ${qty < 0 ? 'text-loss' : ''}`}>{fmtUnits(qty)}</span>
                 {canEdit && qty > 0 && <button className="btn btn-secondary btn-xs" onClick={() => onChange({ mode: 'move', product: p, from: code })}>Move</button>}

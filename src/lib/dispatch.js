@@ -499,7 +499,10 @@ export function checkOrders(orders, mappings = [], { existing = [], helmCodes = 
     else if (!items.length) problems.push({ level: 'hold', code: 'no-items', text: 'Couldn\'t read the items on the packing slip' })
     else if (auto?.unverified.length) {
       problems.push({ level: 'verify', code: 'verify', codes: auto.unverified,
-        text: `Not verified yet: ${auto.unverified.map(u => u.code).join(', ')} — someone with “Link item codes” confirms what it is first` })
+        text: [
+          auto.unverified.some(u => u.status !== 'pending') && `Not verified yet: ${auto.unverified.filter(u => u.status !== 'pending').map(u => u.code).join(', ')} — someone with “Link item codes” confirms what it is first`,
+          auto.unverified.some(u => u.status === 'pending') && `New product waiting for the office: ${auto.unverified.filter(u => u.status === 'pending').map(u => u.code).join(', ')} — approve it in Inventory`,
+        ].filter(Boolean).join(' · ') })
     } else if (auto && !mapping) problems.push({ level: 'hold', code: 'no-items', text: 'Nothing to send on the packing slip' })
     else if (!mapping) problems.push({ level: 'map', code: 'unmapped', text: 'New item — set what goes in each parcel' })
     if (auto?.problem) problems.push(auto.problem)

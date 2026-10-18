@@ -187,3 +187,14 @@ begin
   update inv_meta set rates_at = null where id = 1;
   return jsonb_build_object('taken', taken);
 end $function$;
+
+-- An order code that is a product still waiting for the office: "pending", so its
+-- orders hold (its name, and so its stamp, hasn't been checked yet)
+do $patch2$
+declare d text := pg_get_functiondef('public.dispatch_code_info'::regproc);
+begin
+  if position('''pending''' in d) = 0 then
+    execute replace(d, 'case when (r.own).id is not null then ''own'' when',
+      'case when (r.own).id is not null and (r.own).status <> ''live'' then ''pending'' when (r.own).id is not null then ''own'' when');
+  end if;
+end $patch2$;

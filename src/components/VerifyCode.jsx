@@ -202,8 +202,11 @@ export function CodesToVerify({ codes, me, showToast, onVerified, prefill = {} }
               {c.offer && <div className="text-[11px] text-royal-700">Suggested: {c.offer.items.map(s => `${s.qty} × ${s.name || s.code}`).join(' + ')}{c.offer.kind === 'substitute' ? ' (sent instead)' : ''}</div>}
               {!c.offer && c.status === 'unverified' && c.suggest?.length > 0 && <div className="text-[11px] text-ink/50">HELM: {c.suggest.map(s => `${s.qty} × ${s.name}`).join(' + ')}</div>}
               {c.status === 'broken' && <div className="text-[11px] text-loss">Was verified, but its product has gone — check it again</div>}
+              {c.status === 'pending' && <div className="text-[11px] text-warn">A new product the office hasn’t approved yet — approve it in Inventory and these orders go through</div>}
             </div>
-            {allowed
+            {c.status === 'pending'
+              ? <span className="text-[11px] text-ink/45 shrink-0 text-right">Office to verify</span>
+              : allowed
               ? <button className="btn btn-primary btn-xs shrink-0" onClick={() => setOpen(c)}>Verify</button>
               : <span className="text-[11px] text-ink/45 shrink-0 text-right">Waiting for the office</span>}
           </div>

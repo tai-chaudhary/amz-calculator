@@ -5,7 +5,7 @@ import { fmtUnits, needsPickShelf } from '../lib/inventory'
 import { invDismissTask, loadCodesToVerify } from '../lib/db'
 import { CodesToVerify } from './VerifyCode'
 import { asCode } from './ItemCodes'
-import { canDo } from '../lib/access'
+import { canDo, canApproveProducts } from '../lib/access'
 
 const when = (d) => (d ? new Date(d).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
 
@@ -32,6 +32,7 @@ export default function WarehouseTasksPage({ me, inventory, people = [], office 
 
   const tasks = inventory?.tasks || []
   const products = inventory?.products || []
+  const toApprove = canApproveProducts(me) ? products.filter(p => p.status === 'pending') : []
   const open = tasks.filter(t => t.status === 'open')
     .sort((a, b) => (a.kind === 'count') - (b.kind === 'count') || String(a.from_location).localeCompare(String(b.from_location), 'en', { numeric: true }))
   const done = tasks.filter(t => t.status !== 'open')
@@ -60,6 +61,27 @@ export default function WarehouseTasksPage({ me, inventory, people = [], office 
           <div className="text-sm font-semibold text-ink">Item codes to verify ({codes.length})</div>
           <div className="text-xs text-ink/55 mt-0.5 mb-2">On open orders, not one of our SKUs, and nobody has said what they are. Their orders wait in On hold until they're verified.</div>
           <CodesToVerify codes={codes} me={me} showToast={showToast} onVerified={loadCodes} />
+        </div>
+      )}
+
+      {view === 'open' && toApprove.length > 0 && (
+        <div className="panel-alert mb-3">
+          <div className="text-sm font-semibold text-ink">New products to approve ({toApprove.length})</div>
+          <div className="text-xs text-ink/55 mt-0.5 mb-2">Added at Goods In. Check the name, give each its SKU — item codes can't be linked to them until then.</div>
+          <div className="divide-y divide-rule/70">
+            {toApprove.map(p => (
+              <button key={p.id} className="w-full flex items-center justify-between gap-3 py-2.5 text-left hover:bg-paper/70"
+                onClick={() => onNavigate?.('inventory', p.id)}>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-ink leading-snug">{p.name}</span>
+                  <span className="block text-xs text-ink/50">
+                    <span className="font-mono">{p.code}</span>{p.requested_by ? ` · added by ${p.requested_by}` : ''} · {fmtUnits(p.on_hand)} on shelves
+                  </span>
+                </span>
+                <Icon name="arrowRight" size={14} className="text-ink/30 shrink-0" />
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

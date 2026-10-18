@@ -1348,6 +1348,7 @@ test('courier totals and product patterns', () => {
     ['2XPYREXJUG500ML', { status: 'verified', kind: 'same', items: [{ ...JUG, qty: 2 }] }],
     ['366706946770', { status: 'verified', kind: 'substitute', wanted_name: 'Pyrex 500ml Mixing Bowl', items: [{ ...BOWL07, qty: 2 }] }],
     ['BROKEN-1', { status: 'broken', items: [] }],
+    ['NEW-0001', { status: 'pending', items: [{ code: 'NEW-0001', name: 'Mystery Bucket', qty: 1 }] }],
   ].map(([k, v]) => [normRef(k), v]))
 
   test('the stamp is the inventory name and the units in each box', () => {
@@ -1366,6 +1367,11 @@ test('courier totals and product patterns', () => {
     assert.equal(autoMapping([{ code: 'PYREX-JUG-GLASS-500ML-2PK', qty: 1 }], 1, info).unverified[0].status, 'unverified')
     assert.equal(autoMapping([{ code: 'NEVER-SEEN', qty: 1 }], 1, info).unverified[0].status, 'unknown')
     assert.equal(autoMapping([{ code: 'BROKEN-1', qty: 1 }], 1, info).unverified.length, 1)
+    // A product the office hasn't approved: its name (so its stamp) isn't checked yet
+    assert.equal(autoMapping([{ code: 'NEW-0001', qty: 1 }], 1, info).unverified[0].status, 'pending')
+    const [waiting] = checkOrders([{ slip: { channelRef: 'P1', items: [{ code: 'NEW-0001', qty: 1 }] }, labels: [{ pageIndex: 0, carrier: 'Evri', refs: ['P1'] }] }], [], { codeInfo: info })
+    assert.equal(waiting.blocked, true)
+    assert.match(waiting.problems.find(p => p.code === 'verify').text, /waiting for the office/)
     // One verified, one not: still stopped
     assert.equal(autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 1 }, { code: 'NEVER-SEEN', qty: 1 }], 1, info).mapping, null)
     const odd = autoMapping([{ code: 'PYREX-JUG-GLASS-500ML', qty: 3 }], 2, info)

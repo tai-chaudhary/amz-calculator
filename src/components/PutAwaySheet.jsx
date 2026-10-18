@@ -3,6 +3,7 @@ import { Icon, Modal } from './UI'
 import { LocationInput, ProductSearch, WhoSelect, useWho, num } from './InventoryParts'
 import { cleanLocation, byLocation, fmtUnits } from '../lib/inventory'
 import { invPutAwayPlan, invPutAway, invSaveProduct } from '../lib/db'
+import { canApproveProducts } from '../lib/access'
 
 /**
  * Putting a delivery away: for each line, which product it is and which
@@ -15,6 +16,8 @@ export default function PutAwaySheet({ delivery, me, people = [], office, produc
   const [who, setWho] = useWho(me, people, office)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // The office gives a new product its SKU; anyone else's goes to the office to check
+  const isOffice = canApproveProducts(me)
 
   useEffect(() => {
     invPutAwayPlan(delivery.id).then(plan => {
@@ -30,7 +33,8 @@ export default function PutAwaySheet({ delivery, me, people = [], office, produc
 
   const problemOf = (l) => {
     if (l.skip) return null
-    if (!l.product_id && !(l.newProduct?.code?.trim() && l.newProduct?.name?.trim())) return 'Choose the product'
+    if (!l.product_id && !l.newProduct?.name?.trim()) return 'Choose the product'
+    if (!l.product_id && isOffice && !l.newProduct?.code?.trim()) return 'Give the new product its SKU'
     for (const s of l.shelves) {
       if (!cleanLocation(s.location)) return 'Enter the shelf it went on'
       if (!(num(s.units) > 0)) return 'Enter how many went on each shelf'
@@ -92,8 +96,13 @@ export default function PutAwaySheet({ delivery, me, people = [], office, produc
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <div><label className="label">Product name</label>
                           <input className="input text-base sm:text-sm" value={l.newProduct.name} onChange={e => set(i, { newProduct: { ...l.newProduct, name: e.target.value } })} /></div>
-                        <div><label className="label">HELM code (or a new one)</label>
+                        <div><label className="label">{isOffice ? 'SKU' : 'SKU (if you know it)'}</label>
                           <input className="input text-base sm:text-sm uppercase" value={l.newProduct.code} onChange={e => set(i, { newProduct: { ...l.newProduct, code: e.target.value } })} /></div>
+                        {!isOffice && (
+                          <div className="sm:col-span-2 text-xs text-warn bg-warn/5 border border-warn/25 rounded-[6px] px-2.5 py-1.5">
+                            The office checks the name and gives it its SKU. It goes on the shelf now and shows in Inventory as “Office to verify” until then.
+                          </div>
+                        )}
                         <button className="btn btn-ghost btn-xs justify-self-start" onClick={() => set(i, { newProduct: null })}>Search instead</button>
                       </div>
                     ) : (

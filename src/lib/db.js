@@ -1285,6 +1285,8 @@ export const invAssign = ({ productId, location, assign, by }) =>
 export const invSaveLocation = ({ code, pickable, note, by }) =>
   rpc('inv_save_location', { p_code: code, p_pickable: pickable, p_note: note || '', p_by: by })
 export const invSaveProduct = (id, fields, by) => rpc('inv_save_product', { p_id: id || null, p: fields, p_by: by })
+/** The office checks a product the warehouse added: its name, SKU and stamp name; then it's live */
+export const invApproveProduct = (id, code, name, stamp, by) => rpc('inv_approve_product', { p_id: id, p_code: code, p_name: name, p_stamp: stamp || null, p_by: by })
 export const invDismissTask = (id, note, by) => rpc('inv_dismiss_task', { p_task: id, p_note: note || '', p_by: by })
 export const invPutAwayPlan = (deliveryId) => rpc('inv_put_away_plan', { p_delivery: deliveryId })
 export const invPutAway = (deliveryId, lines, by) => rpc('inv_put_away', { p_delivery: deliveryId, p_lines: lines, p_by: by })
