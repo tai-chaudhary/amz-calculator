@@ -39,9 +39,10 @@ import {
   loadStockRequests, loadRequestProducts, createStockRequest, updateStockRequest, addRequestEvent, requestsOnPo,
   uploadRequestPhoto, requestPhotoUrl,
   loadGoodsIn, bookInDelivery, logUnexpectedDelivery, updateDelivery, uploadGoodsInPhoto, goodsInPhotoUrl,
-  loadInventory,
+  loadInventory, loadOpenParcels,
 } from './lib/db'
 import { stockState, needsRestock, needsPickShelf } from './lib/inventory'
+import { needsAttention } from './lib/tracking'
 
 
 // Each page is its own download, fetched the first time it's opened (and
@@ -64,6 +65,7 @@ const PAGE_MODULES = {
   'goods-in': () => import('./components/GoodsInPage'),
   inventory: () => import('./components/InventoryPage'),
   tasks: () => import('./components/WarehouseTasksPage'),
+  tracking: () => import('./components/TrackingPage'),
   families: () => import('./components/FamiliesPage'),
   shipping: () => import('./components/ShippingPage'),
   packaging: () => import('./components/PackagingPage'),
@@ -100,6 +102,7 @@ const StockRequestsPage = lazyPage('requests')
 const GoodsInPage = lazyPage('goods-in')
 const InventoryPage = lazyPage('inventory')
 const WarehouseTasksPage = lazyPage('tasks')
+const TrackingPage = lazyPage('tracking')
 const FamiliesPage = lazyPage('families')
 const ShippingPage = lazyPage('shipping')
 const PackagingPage = lazyPage('packaging')
@@ -455,6 +458,14 @@ export default function App() {
   }, [])
   useEffect(() => { if (session && me) refreshInventory() }, [session, me?.id, me?.permissions, refreshInventory]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Delivery tracking: parcels still on their way, so the menu can count the late ones
+  const [openParcels, setOpenParcels] = useState([])
+  const refreshParcels = useCallback(async () => {
+    if (!canAccess(meRef.current, 'tracking')) return
+    setOpenParcels(await loadOpenParcels())
+  }, [])
+  useEffect(() => { if (session && me) refreshParcels() }, [session, me?.id, me?.permissions, refreshParcels]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const refreshing = React.useRef(false)
   const refreshShared = useCallback(async ({ silent = true } = {}) => {
     if (refreshing.current || !session || document.visibilityState !== 'visible') return
@@ -472,13 +483,14 @@ export default function App() {
       setHuntItems(hi)
       setProfiles(prof)
       refreshDispatch()
+      refreshParcels()
       setLastRefresh(Date.now())
     } catch {
       if (!silent) showToast('Could not refresh — check your connection', 'error')
     } finally {
       refreshing.current = false
     }
-  }, [session, refreshDispatch])
+  }, [session, refreshDispatch, refreshParcels])
 
   useEffect(() => {
     if (!session || loading) return
@@ -2021,6 +2033,7 @@ export default function App() {
     if (id === 'dispatch') return dispatchIndex.batches.filter(b => !b.printed_at && b.ship_date === todayLondon).length
     if (id === 'requests') return canAccess(me, 'purchases') ? stockRequests.filter(r => requestState(r).needsOffice).length : 0
     if (id === 'tasks') return (inventory?.tasks || []).filter(t => t.status === 'open').length + (inventory?.products || []).filter(needsPickShelf).length
+    if (id === 'tracking') return openParcels.filter(p => needsAttention(p)).length
     if (id === 'inventory') return restockList.filter(p => ['out', 'low'].includes(p.st.state)).length
     if (id === 'goods-in') {
       if (canAccess(me, 'purchases')) return goodsIn.deliveries.filter(deliveryNeedsOffice).length
@@ -2217,6 +2230,11 @@ export default function App() {
                   onRefresh={refreshInventory}
                   onNavigate={navigateTo}
                 />
+                </div>
+              )}
+              {allowed && page === 'tracking' && (
+                <div>
+                <TrackingPage showToast={showToast} />
                 </div>
               )}
               {allowed && page === 'dispatch-dashboard' && (

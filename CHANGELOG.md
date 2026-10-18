@@ -3,6 +3,26 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.32.0 — 18 Oct 2026
+- New: Warehouse → Delivery tracking. Every parcel HELM booked in the last 30 days, as the courier
+  sees it, refreshed from HELM every half hour (read only, nothing is written to HELM)
+- Parcels go Next Day, so one not delivered within 2 working days of its label being booked (Sunday
+  off) is late. Late parcels, courier problems (failed attempt, on hold, address problem, returned)
+  and labels the courier never scanned are listed under "Needs attention", oldest first, and the
+  menu shows how many there are
+- Couriers: on-time rate, late, delivered late, problems, returns and the usual time to delivery,
+  side by side. The courier is taken from the service: labels bought through Amazon are Evri Next
+  Day. Evri account labels (Hermes 24/48) don't report tracking to HELM and show as "Not tracked"
+- Products: which products keep being returned, failing delivery or arriving late, to see what may
+  need better packing. Tap one to see its parcels
+- Each parcel opens to its courier history, what was in it and a link to the courier's tracking page
+- No customer details are stored: no names, addresses, phones or emails, and courier messages and
+  tracking links have anything like a name or postcode taken out
+- New permission "Delivery tracking" (on for the Warehouse role); like the other warehouse sections
+  it doesn't let anyone see costs
+- Database: supabase/migrations/035_delivery_tracking.sql (applied 18 Oct); new edge function
+  supabase/functions/helm-tracking, on a schedule at :07 and :37
+
 ## v2.31.5 — 18 Oct 2026
 - Tracking numbers come from HELM. helm-sync reads each labelled order's shipment with it
   (shipment.parcels.tracking, per HELM's API docs) at no extra cost, and every minute checks the

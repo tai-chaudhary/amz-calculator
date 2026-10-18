@@ -1287,3 +1287,52 @@ test('slow stock: nothing sold in 60 days, or more than four months of it', asyn
   assert.equal(slowState({ on_hand: 10, last_sold: '2026-10-10', daily: 1 }, today), null)
   assert.equal(slowState({ on_hand: 500, last_sold: '2026-10-16', daily: 2 }, today).kind, 'over')
 })
+
+// ── Delivery tracking ───────────────────────────────────────────────────────
+import { dueDay, parcelState, summariseParcels, productPatterns, carrierName, needsAttention } from '../src/lib/tracking.js'
+
+test('a parcel is due 2 working days after booking, Sunday off', () => {
+  assert.equal(dueDay('2026-10-12T15:00:00Z'), '2026-10-14')   // Mon → Wed
+  assert.equal(dueDay('2026-10-16T15:00:00Z'), '2026-10-19')   // Fri → Sat, Mon
+  assert.equal(dueDay('2026-10-17T10:00:00Z'), '2026-10-20')   // Sat → Mon, Tue
+  assert.equal(dueDay('2026-10-12T23:30:00Z'), '2026-10-15')   // late Monday UTC is Tuesday in London (BST)
+})
+
+test('late, delivered late and on time', () => {
+  const now = new Date('2026-10-15T09:00:00Z')
+  const p = (o) => ({ shipment_status: 1, tracking: 'T1', shipped_at: '2026-10-12T15:00:00Z', ...o })
+  assert.equal(parcelState(p({ status: 3 }), now).state, 'late')
+  assert.equal(parcelState(p({ status: 3 }), new Date('2026-10-14T20:00:00Z')).state, 'moving')
+  const lateDelivered = parcelState(p({ status: 7, delivered_at: '2026-10-15T08:00:00Z' }), now)
+  assert.equal(lateDelivered.state, 'delivered'); assert.equal(lateDelivered.late, true)
+  assert.equal(parcelState(p({ status: 7, delivered_at: '2026-10-13T12:00:00Z' }), now).late, false)
+  assert.equal(parcelState(p({ status: 10 }), now).state, 'problem')
+  assert.equal(parcelState(p({ status: 1 }), new Date('2026-10-13T12:00:00Z')).state, 'stuck')
+  assert.equal(parcelState(p({ status: 14 }), now).state, 'untracked')
+  assert.equal(needsAttention(p({ status: 3, shipment_status: 2 }), now), false)   // a failed booking isn't a parcel
+})
+
+test('the courier comes from the service, not the account it was bought through', () => {
+  assert.equal(carrierName({ carrier: 'Amazon', service: 'Evri Next Day Contract Rate' }), 'Evri')
+  assert.equal(carrierName({ carrier: 'DHLParcelUKCloud', service: 'DHL Parcel UK Parcel' }), 'DHL')
+  assert.equal(carrierName({ carrier: 'Evri Corporate', service: 'Hermes 24 POD' }), 'Evri')
+})
+
+test('courier totals and product patterns', () => {
+  const now = new Date('2026-10-16T09:00:00Z')
+  const base = { shipment_status: 1, tracking: 'T', shipped_at: '2026-10-12T15:00:00Z', service: 'DHL Parcel UK Parcel' }
+  const parcels = [
+    { ...base, status: 7, delivered_at: '2026-10-13T12:00:00Z', items: [{ code: 'A', name: 'Bowl', qty: 1 }] },
+    { ...base, status: 7, delivered_at: '2026-10-15T12:00:00Z', items: [{ code: 'A', name: 'Bowl', qty: 1 }] },
+    { ...base, status: 10, returned_at: '2026-10-14T12:00:00Z', events: [{ s: 6 }, { s: 10 }], items: [{ code: 'A', name: 'Bowl', qty: 1 }] },
+    { ...base, status: 4, items: [{ code: 'B', name: 'Salt', qty: 2 }] },
+    { ...base, status: 7, delivered_at: '2026-10-13T12:00:00Z', items: [{ code: 'C', name: 'Mop', qty: 1 }] },
+  ]
+  const { total } = summariseParcels(parcels, now)
+  assert.equal(total.delivered, 3); assert.equal(total.onTime, 2); assert.equal(total.lateDelivered, 1)
+  assert.equal(total.lateOpen, 2); assert.equal(total.returned, 1); assert.equal(total.onTimePct, 40)
+  const pats = productPatterns(parcels, now)
+  assert.deepEqual(pats.map(r => r.code), ['A', 'B'])
+  assert.equal(pats[0].returned, 1); assert.equal(pats[0].trouble, 2); assert.equal(pats[0].failed, 0)
+  assert.equal(pats[0].rate, 66.7)
+})

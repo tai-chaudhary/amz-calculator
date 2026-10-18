@@ -35,6 +35,7 @@ export const NAV_GROUPS = [
     { id: 'goods-in', icon: 'package', label: 'Goods In' },
     { id: 'inventory', icon: 'box', label: 'Inventory' },
     { id: 'tasks', icon: 'check', label: 'Tasks' },
+    { id: 'tracking', icon: 'pin', label: 'Delivery tracking' },
   ] },
   { label: 'Optimise', items: [
     { id: 'families', icon: 'layers', label: 'Product Families' },
@@ -80,8 +81,8 @@ export const ROLES = {
     pages: () => ['calculator', 'saved', 'hunter', 'stock', 'live'],
   },
   warehouse: {
-    label: 'Warehouse', description: 'Dispatch, stock requests, goods in, inventory and tasks. Never sees what anything costs.',
-    pages: () => ['dispatch', 'dispatch-dashboard', 'requests', 'goods-in', 'inventory', 'tasks'],
+    label: 'Warehouse', description: 'Dispatch, stock requests, goods in, inventory, tasks and delivery tracking. Never sees what anything costs.',
+    pages: () => ['dispatch', 'dispatch-dashboard', 'requests', 'goods-in', 'inventory', 'tasks', 'tracking'],
   },
   accounts: {
     label: 'Accounts', description: 'Pending payments only — pay orders and file invoices.',
@@ -125,6 +126,7 @@ export function landingPage(me) {
 }
 
 /** Warehouse sections never show what anything costs; anyone with another section (or an admin) does. */
-export const WAREHOUSE_ONLY = ['dispatch', 'dispatch-dashboard', 'requests', 'goods-in', 'inventory', 'tasks']
+// (public.sees_costs() in the database keeps the same list)
+export const WAREHOUSE_ONLY = ['dispatch', 'dispatch-dashboard', 'requests', 'goods-in', 'inventory', 'tasks', 'tracking']
 export const seesCosts = (me) => !!me && me.active !== false &&
   (me.role === 'admin' || (Array.isArray(me.permissions) && me.permissions.some(p => !WAREHOUSE_ONLY.includes(p))))

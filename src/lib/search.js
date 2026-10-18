@@ -34,6 +34,7 @@ export const SEARCH_COVERAGE = {
   'goods-in': 'records',     // deliveries, by GI number, supplier, PO and delivery note
   inventory:  'records',     // stock products by name and HELM code, and shelves by code
   tasks:      'records',     // open tasks, by T number and product
+  tracking:   'page',        // parcels: found from the page's own search
   payments:   'records',     // the same orders, reached from payments
   issues:     'page',        // reached from the order they belong to
   buildmonth: 'page',

@@ -1364,3 +1364,37 @@ export async function loadSubstitutes({ from, to, uploadIds } = {}) {
   if (error) throw error
   return data || []
 }
+
+// ── Delivery tracking (helm_parcels, filled by the helm-tracking edge function) ──
+const PARCEL_COLUMNS = 'id, shipment_id, order_id, order_ref, channel, items, carrier, service, shipment_status, parcel_no, parcels, tracking, tracking_url, status, shipped_at, expected_at, collected_at, delivered_at, problem_at, returned_at, last_event_at, last_event, events'
+
+export async function loadParcels({ from } = {}) {
+  const size = 1000
+  const page = (i, opts) => {
+    let q = supabase.from('helm_parcels').select(PARCEL_COLUMNS, opts).order('shipped_at', { ascending: false }).range(i * size, (i + 1) * size - 1)
+    if (from) q = q.gte('shipped_at', `${from}T00:00:00`)
+    return q
+  }
+  const first = await page(0, { count: 'exact' })
+  if (first.error) throw first.error
+  const all = [...(first.data || [])]
+  const total = first.count ?? all.length
+  if (total <= size) return all
+  const rest = await Promise.all(Array.from({ length: Math.ceil(total / size) - 1 }, (_, i) => page(i + 1).then(r => r.error ? [] : (r.data || []))))
+  return all.concat(...rest)
+}
+
+/** Parcels still on their way, enough to count the late ones for the menu. */
+export async function loadOpenParcels() {
+  const since = new Date(Date.now() - 30 * 864e5).toISOString()
+  const { data, error } = await supabase.from('helm_parcels')
+    .select('id, shipment_status, tracking, status, shipped_at, delivered_at')
+    .gte('shipped_at', since).not('status', 'in', '(7,12,14)')
+  if (error) return []
+  return data || []
+}
+
+export async function loadTrackingSync() {
+  const { data } = await supabase.from('helm_tracking_sync').select('*').eq('id', 1).maybeSingle()
+  return data || null
+}
