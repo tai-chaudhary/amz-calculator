@@ -8,6 +8,7 @@ Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
   the page opens, as it did before the redesign. Since v2.31.0 a batch with more than 12 products
   started folded away, and the only way to open it was tapping the batch code. A clear
   "What's in this batch · Show / Hide" bar now sits under each batch
+- The products in each batch are listed with the most labels first. The print order is unchanged
 
 ## v2.32.0 — 18 Oct 2026
 - New: Warehouse → Delivery tracking. Every parcel HELM booked in the last 30 days, as the courier

@@ -2111,7 +2111,7 @@ function BatchCard({ file, statOf, picked, printing, responsible, onPick, onPrin
       </button>
       {open && (
         <ul className="border-t border-rule divide-y divide-rule/70">
-          {g.map(x => {
+          {[...g].sort((a, b) => b.label_count - a.label_count || a.label_name.localeCompare(b.label_name)).map(x => {
             const st = statOf(x)
             return (
               <li key={x.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-sky/20 cursor-pointer" onClick={() => onOpenGroup(x)}>
