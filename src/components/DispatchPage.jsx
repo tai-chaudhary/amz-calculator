@@ -5,16 +5,16 @@ import {
   loadHeldLabels, loadDispatchUploads, loadDispatchLabel, downloadDispatchFile, saveDispatchUpload,
   releaseHeldLabels, cancelDispatchLabels, markBatchesPrinted,
   loadBatchStats, loadOpenLabels, dispatchBatch, dispatchLabelIds, searchDispatchLabels, markLabelReprinted, loadDayLabels,
-  packBatch, loadDashboardLabels, loadItemUnits, saveItemUnits, loadSubstitutes, loadLabelsMissingTracking, setLabelTracking,
+  packBatch, loadDashboardLabels, loadItemUnits, saveItemUnits, loadSubstitutes,
 } from '../lib/db'
 import {
   itemKey, suggestLabelName, londonDate, decode, planUpload, manualSlip, samePostcode, summariseDispatch, guessUnits, normRef,
   suggestStamp, stampName, missingDetail, helmProductsToUnits, nextWorkingDay, londonTime, resolveMapping, boxStamps,
-  stampCountProblem, fixedStamp, unitsPerBox, stampProgress, ORDER_STAGES, parseLabel,
+  stampCountProblem, fixedStamp, unitsPerBox, stampProgress, ORDER_STAGES,
   parseRanges, compressRanges, isDelayed, daysLate, pickTotals, byPrintOrder,
 } from '../lib/dispatch'
 import { exportRowsToCsv, stampedName } from '../lib/csv'
-import { buildPrintFile, printPdf, downloadPdf, buildCollectionSheet, pagesAsImages, readTrackingStrips, releaseOcr } from '../lib/dispatchPdf'
+import { buildPrintFile, printPdf, downloadPdf, buildCollectionSheet, pagesAsImages } from '../lib/dispatchPdf'
 import { startJob, subscribeJobs, dismissJob, toldJobs } from '../lib/dispatchJobs'
 import NewOrdersCard from './NewOrdersCard'
 import { PickList, ShortCheck, SubstituteFlow } from './PickList'
@@ -35,6 +35,11 @@ let lastPerson = ''
 const timeOf = (iso) => (iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : '')
 const dayOf = (d) => (d ? new Date(`${String(d).slice(0, 10)}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : '')
 const plural = (n, word) => `${n} ${word}${n !== 1 ? (/(s|x|ch|sh)$/.test(word) ? 'es' : 's') : ''}`
+// A tracking number, marked when HELM has confirmed it (or supplied it)
+const Tracking = ({ l }) => (l?.tracking ? (
+  <span className="tabular-nums">{l.tracking}{String(l.tracking_source || '').startsWith('helm')
+    ? <span className="ml-1 text-gain" title={l.tracking_source === 'helm_verified' ? 'Matches HELM' : l.tracking_source === 'helm_corrected' ? `From HELM — the label read ${l.tracking_read}` : 'From HELM'}>✓ HELM</span> : null}</span>
+) : null)
 const itemsText = (items = []) => items.map(i => `${i.qty === '*' ? 'Any qty' : i.qty} × ${decode(i.name || i.code)}`).join(', ')
 
 /**
@@ -525,10 +530,7 @@ export default function DispatchPage({ me, focusId, onNavigate, showToast, onLog
           )}
 
           {tab === 'uploads' && (
-            <>
-              {me?.role === 'admin' && <TrackingRefill showToast={showToast} onLog={onLog} onDone={changed} />}
-              <UploadsList uploads={uploads} onOpenDay={(d) => { setDate(d); setTab('batches') }} />
-            </>
+            <UploadsList uploads={uploads} onOpenDay={(d) => { setDate(d); setTab('batches') }} />
           )}
         </>
       )}
@@ -708,7 +710,7 @@ function BatchDrawer({ batch, highlight, printing, stat, onClose, onPrint, onDow
                       <div className="text-ink/70 tabular-nums">{l.channel_ref || l.helm_order || '—'}</div>
                       <div className="text-ink/40">{itemsText(l.items)}</div>
                     </td>
-                    <td className="px-3 py-2.5 text-xs text-ink/55 tabular-nums">{l.tracking || '—'}</td>
+                    <td className="px-3 py-2.5 text-xs text-ink/55">{l.tracking ? <Tracking l={l} /> : '—'}</td>
                     <td className="px-3 py-2.5 text-xs whitespace-nowrap"><LabelStatus label={l} /></td>
                   </tr>
                 ))}
@@ -1543,72 +1545,6 @@ function EditMapping({ mapping, me, showToast, onClose, onSaved }) {
 
 // ── Uploads ──────────────────────────────────────────────────────────────────
 
-/**
- * Tracking numbers that didn't come through when the labels were read (Evri's
- * picture labels, mostly). Reads just the tracking strip again on those
- * labels, enlarged, and fills in what it finds. (HELM's API doesn't give
- * tracking numbers out, so the labels are the only source.)
- */
-function TrackingRefill({ showToast, onLog, onDone }) {
-  const [missing, setMissing] = useState(null)
-  const [run, setRun] = useState(null)   // { done, total, found }
-  useEffect(() => { loadLabelsMissingTracking().then(setMissing).catch(() => setMissing([])) }, [])
-  if (!missing?.length && !run) return null
-
-  const go = async () => {
-    const list = missing
-    const state = { done: 0, total: list.length, found: 0 }
-    setRun({ ...state })
-    try {
-      const byUpload = new Map()
-      for (const l of list) {
-        if (!l.upload?.storage_path) { state.done++; continue }
-        if (!byUpload.has(l.upload_id)) byUpload.set(l.upload_id, { path: l.upload.storage_path, labels: [] })
-        byUpload.get(l.upload_id).labels.push(l)
-      }
-      for (const { path, labels } of byUpload.values()) {
-        let bytes
-        try { bytes = await downloadDispatchFile(path) } catch { state.done += labels.length; setRun({ ...state }); continue }
-        const texts = await readTrackingStrips(bytes, labels.map(l => l.page_index), () => { state.done++; setRun({ ...state }) })
-        for (const l of labels) {
-          const t = parseLabel({ items: [], ocr: texts.get(l.page_index) || '' }).tracking
-          if (t) state.found += await setLabelTracking(l.id, t).catch(() => 0)
-        }
-        setRun({ ...state })
-      }
-      onLog?.({ entity_type: 'dispatch', entity_name: 'Tracking numbers', action: 'Filled in',
-        detail: `${state.found} of ${state.total} labels without one`, source: 'dispatch' })
-      showToast?.(`${state.found} tracking number${state.found !== 1 ? 's' : ''} filled in`)
-      setMissing(await loadLabelsMissingTracking().catch(() => []))
-      onDone?.()
-    } catch (e) { showToast?.(e?.message || 'Couldn’t finish', 'error') }
-    finally { releaseOcr(); setRun(r => (r ? { ...r, finished: true } : r)) }
-  }
-
-  const busy = run && !run.finished
-  return (
-    <div className="panel-notice mb-3 flex items-center gap-3 flex-wrap">
-      <div className="min-w-0 flex-1 text-sm">
-        {busy ? (
-          <>
-            <b>Reading tracking numbers…</b> {run.done} of {run.total} · {run.found} found
-            <div className="mt-1.5 h-1.5 rounded-full bg-ink/10 overflow-hidden max-w-md">
-              <div className="h-full bg-royal-500 transition-all" style={{ width: `${Math.round((run.done / Math.max(1, run.total)) * 100)}%` }} />
-            </div>
-            <div className="text-xs text-ink/50 mt-1">Keep this page open until it finishes.</div>
-          </>
-        ) : run?.finished ? (
-          <><b>{run.found}</b> of {run.total} filled in.{missing?.length ? ` ${missing.length} still without one — the label couldn't be read clearly enough.` : ''}</>
-        ) : (
-          <><b>{missing.length} label{missing.length !== 1 ? 's' : ''}</b> from the last 14 days have no tracking number.
-            <span className="text-ink/55"> Read them again to fill them in.</span></>
-        )}
-      </div>
-      {!busy && missing?.length > 0 && <button className="btn btn-secondary btn-sm" onClick={go}>Fill in tracking numbers</button>}
-    </div>
-  )
-}
-
 function UploadsList({ uploads, onOpenDay }) {
   if (!uploads.length) return <div className="surface"><EmptyState icon="upload" title="Nothing uploaded yet" /></div>
   return (
@@ -1944,7 +1880,7 @@ function FindReprint({ me, cutoff, showToast, onLog, onChanged, onReprint, peopl
                   <div className="text-sm text-ink/70">{itemsText(l.items)}</div>
                   <div className="text-sm text-ink mt-1.5">{l.customer || '—'} <span className="text-ink/50">{l.postcode}</span></div>
                   <div className="text-xs text-ink/50 mt-0.5 tabular-nums">
-                    {[l.channel_ref, l.helm_order, l.tracking].filter(Boolean).join(' · ')}
+                    {[l.channel_ref, l.helm_order].filter(Boolean).join(' · ')}{l.tracking ? <>{(l.channel_ref || l.helm_order) ? ' · ' : ''}<Tracking l={l} /></> : null}
                   </div>
                   <div className="text-xs text-ink/50 mt-0.5">
                     {l.batch ? <>Batch <b className="text-ink/70">{l.batch.code}</b> · label {l.seq} of {l.batch.label_count} · {dayOf(l.batch.ship_date)} · {l.batch.carrier} {l.batch.service}</> : 'Not in a batch'}

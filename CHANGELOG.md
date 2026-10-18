@@ -3,15 +3,17 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
-## v2.31.4 — 18 Oct 2026
-- Checked whether HELM can supply tracking numbers: it can't, as things stand. Every labelled order has
-  a shipment in HELM, but HELM's API doesn't give out the tracking number (not on the order, the
-  shipment or its parcels), and shipments can't be looked up by order. helm-sync is ready for it
-  anyway: it looks for tracking numbers on what it reads, and when HELM has one it's checked against
-  the label every minute. Same: marked verified. Different (one label, one number): HELM's is used and
-  what was read is kept. None read: HELM's fills it in
-- Dispatch → Uploads (office): "Fill in tracking numbers" re-reads just the tracking strip on labels
-  from the last 14 days that have none, enlarged, and fills in what it finds
+## v2.31.5 — 18 Oct 2026
+- Tracking numbers come from HELM. helm-sync reads each labelled order's shipment with it
+  (shipment.parcels.tracking, per HELM's API docs) at no extra cost, and every minute checks the
+  labels against it. Same as read off the label: verified. Different (one label, one number): HELM's
+  is used, and what was read is kept. None read: HELM's fills it in. Several parcels on one order are
+  left as they are
+- Every label from the last fortnight now has a tracking number. Evri: 556 filled in from HELM, 16
+  verified, 9 read off the label only. DHL: 109 verified, 2 filled in, 2 read off the label only
+- Most Evri numbers are T00FFA… (16 characters). The H-08AN-A-… code on the label is often a routing
+  code, not the tracking number, which is why reading it off the label was never enough
+- "✓ HELM" beside a tracking number (batch labels, Find & reprint) means HELM confirmed or supplied it
 - Database: supabase/migrations/034_helm_tracking.sql (applied 18 Oct); helm-sync redeployed
 
 ## v2.31.3 — 18 Oct 2026

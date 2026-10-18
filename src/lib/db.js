@@ -1364,27 +1364,3 @@ export async function loadSubstitutes({ from, to, uploadIds } = {}) {
   if (error) throw error
   return data || []
 }
-
-// ── Tracking numbers that didn't come through ──
-/** Labels from the last few days with no tracking number, with their upload's file. */
-export async function loadLabelsMissingTracking({ days = 14 } = {}) {
-  const since = new Date(Date.now() - days * 864e5).toISOString()
-  const out = []
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await supabase.from('dispatch_labels')
-      .select('id, upload_id, page_index, carrier, upload:dispatch_uploads(storage_path, code)')
-      .is('tracking', null).neq('status', 'cancelled').gte('created_at', since)
-      .order('upload_id').order('page_index').range(from, from + 999)
-    if (error) throw error
-    out.push(...(data || []))
-    if (!data || data.length < 1000) break
-  }
-  return out
-}
-/** Fills a label's tracking number, only if it still has none. */
-export async function setLabelTracking(id, tracking) {
-  const { data, error } = await supabase.from('dispatch_labels')
-    .update({ tracking, tracking_source: 'reread' }).eq('id', id).is('tracking', null).select('id')
-  if (error) throw error
-  return (data || []).length
-}
