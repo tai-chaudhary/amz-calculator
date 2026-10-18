@@ -3,6 +3,15 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.33.0 — 18 Oct 2026
+- New Orders: a new "All open" list shows every order HELM hasn't shipped in one place: new,
+  processing, picking, picked, packing, sorted, labelled but not uploaded, back orders and holds.
+  It's grouped by courier like the other lists, each line says how many orders are at each stage,
+  and each order shows its HELM status. Search works on the status too (e.g. "back order")
+- Back orders and holds were only shown to admins. The whole warehouse team now sees them, under
+  "Back orders & holds". Clearing orders is still for the office only
+- Database: supabase/migrations/036_helm_all_open_orders.sql (applied 18 Oct)
+
 ## v2.32.2 — 18 Oct 2026
 - Dispatch: the products in each batch are listed with the most labels first. The print order is unchanged
 

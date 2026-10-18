@@ -51,7 +51,8 @@ function byCarrier(orders) {
  * New Orders: everything in HELM without a label yet, as the warehouse will
  * pack it — "Qty x Product" lines with how many orders each, Evri first —
  * plus orders HELM has labelled that haven't been uploaded here yet. Stock
- * is checked against the lot. Back orders and holds are for the office.
+ * is checked against the lot. "All open" is every order HELM hasn't shipped,
+ * back orders and holds included, each with its HELM status.
  * HELM is read every minute; this refreshes itself while it's on screen.
  */
 export default function NewOrdersCard({ me, mappings = [], names = new Map(), focus = null, showToast, onLog }) {
@@ -102,6 +103,8 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
   const [cutEdit, setCutEdit] = useState(null)
   const labelled = orders.filter(o => o.phase === 'labelled')
   const attention = orders.filter(o => o.phase === 'backorder' || o.phase === 'hold')
+  // Everything HELM hasn't shipped, in one list
+  const allOpen = orders
   const check = useMemo(() => helmStockCheck(orders, data?.stock || {}), [orders, data])
   const units = (list) => list.reduce((s, o) => s + (o.units || []).reduce((t, u) => t + (Number(u.qty) || 0), 0), 0)
   const viewOf = (o) => (o.phase === 'labelled' ? 'labelled' : o.phase === 'backorder' || o.phase === 'hold' ? 'attention'
@@ -169,18 +172,21 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
   const todays = fresh.filter(o => !late.includes(o))
   const VIEWS = [
     { id: 'today', label: 'Today', list: todays, tone: 'brand' },
+    { id: 'all', label: 'All open', list: allOpen, tone: 'quiet',
+      note: `Every order HELM hasn't shipped: ${statusCounts(allOpen)}.` },
     ...laterDays.map(d => ({ id: `day:${d}`, label: shortDay(d), list: allNew.filter(o => o.ship_day === d), tone: 'quiet',
       note: 'Ordered after the cut-off — label these on the day. Their stock is held already.' })),
     { id: 'late', label: 'Past ship-by', list: late, tone: 'alert',
       note: office ? 'Should have gone already. Orders that went another way (an Amazon label from the old portal, say) can be cleared.' : 'Should have gone already — label these first.' },
     { id: 'labelled', label: 'Labelled', list: labelled, tone: labelLate ? 'warn' : 'quiet',
       note: labelLate ? `Labelled in HELM, not uploaded here — the oldest ${ago(oldestLabel, now)} ago. Upload the labels.` : 'Labelled in HELM, not uploaded here yet.' },
-    ...(office ? [{ id: 'attention', label: 'Needs attention', list: attention, tone: 'alert', note: 'Back orders and holds in HELM — office only.' }] : []),
+    { id: 'attention', label: 'Back orders & holds', list: attention, tone: 'alert',
+      note: 'On back order or held in HELM — not ready to label yet.' },
   ].filter(v => v.list.length || v.id === 'today')
   const current = VIEWS.find(v => v.id === view) || VIEWS.find(v => v.list.length) || VIEWS[0]
   const words = q.toLowerCase().split(/\s+/).filter(Boolean)
   const shownOrders = (current?.list || []).filter(o => !words.length
-    || words.every(w => `${stampOf(o)} ${o.ref || ''} ${o.order_number || ''} ${(o.items || []).map(i => i.code).join(' ')}`.toLowerCase().includes(w)))
+    || words.every(w => `${stampOf(o)} ${o.ref || ''} ${o.order_number || ''} ${(o.items || []).map(i => i.code).join(' ')} ${statusOf(o)}`.toLowerCase().includes(w)))
   const groups = current?.id === 'labelled' || current?.id === 'attention' ? [['', shownOrders]] : byCarrier(shownOrders)
   const clearable = office && (current?.id === 'late' ? late
     : current?.id === 'labelled' ? labelled.filter(o => minsSince(o.labelled_at, now) > 24 * 60) : [])
@@ -272,7 +278,7 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
                     {(current?.list.length || 0) > 8 && (
                       <div className="relative flex-1">
                         <Icon name="search" size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink/35 pointer-events-none" />
-                        <input className="input py-1.5 pl-8 text-sm" value={q} onChange={e => setQ(e.target.value)} placeholder="Product or order ref"
+                        <input className="input py-1.5 pl-8 text-sm" value={q} onChange={e => setQ(e.target.value)} placeholder={current?.id === 'all' ? 'Product, order ref or status' : 'Product or order ref'}
                           type="search" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Search these orders" />
                       </div>
                     )}
@@ -308,7 +314,8 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
                         return (
                           <OrderLine key={k} line={line} isOpen={expanded.has(k)} onToggle={() => toggle(k)} flags={flagsOf(line)}
                             focus={focus} focusRef={focusRef} now={now} today={today} labelled={current.id === 'labelled'}
-                            canClear={office && current.id !== 'today' && !current.id.startsWith('day:')} onClear={clear} />
+                            showStatus={current.id === 'all' || current.id === 'attention'}
+                            canClear={office && current.id !== 'today' && current.id !== 'all' && !current.id.startsWith('day:')} onClear={clear} />
                         )
                       })}
                     </ul>
@@ -349,6 +356,17 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
 }
 
 const RANK = ['short', 'missing', 'topup']
+
+// Where each order is in HELM
+const HELM_STATUS = { 2: 'New order', 3: 'Processing', 4: 'Picking', 5: 'Part picked', 6: 'Picked', 7: 'Packing', 10: 'Sorting', 11: 'Sorted', 12: 'Back order', 8: 'Labelled' }
+const statusOf = (o) => (o.phase === 'hold' ? 'On hold' : o.phase === 'labelled' ? 'Labelled' : o.phase === 'backorder' ? 'Back order' : HELM_STATUS[o.status] || 'New order')
+const STATUS_TONE = { 'Back order': 'bg-coral/10 text-loss', 'On hold': 'bg-coral/10 text-loss', Labelled: 'bg-gain/10 text-gain', Picked: 'bg-royal-50 text-royal-700', Packing: 'bg-royal-50 text-royal-700', Sorted: 'bg-royal-50 text-royal-700' }
+const STATUS_ORDER = ['New order', 'Processing', 'Picking', 'Part picked', 'Picked', 'Packing', 'Sorting', 'Sorted', 'Labelled', 'Back order', 'On hold']
+function statusCounts(list) {
+  const n = new Map()
+  for (const o of list) n.set(statusOf(o), (n.get(statusOf(o)) || 0) + 1)
+  return [...n.entries()].sort((a, b) => STATUS_ORDER.indexOf(a[0]) - STATUS_ORDER.indexOf(b[0])).map(([k, v]) => `${v} ${k.toLowerCase()}${v !== 1 && / order$/.test(k) ? 's' : ''}`).join(' · ') || 'none'
+}
 const shortDay = (d) => new Date(`${d}T12:00:00`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })
 
 // "3 X 151 CHALKY FURNITURE PAINT 400ML" → 3 and "151 Chalky Furniture Paint 400ml".
@@ -368,7 +386,7 @@ function splitStamp(stamp) {
 }
 
 /** A line: quantity in each parcel, the product, how many orders; tap for the orders on it. */
-function OrderLine({ line, isOpen, onToggle, flags, focus, focusRef, now, today, labelled, canClear, onClear }) {
+function OrderLine({ line, isOpen, onToggle, flags, focus, focusRef, now, today, labelled, showStatus, canClear, onClear }) {
   const { qty, name } = splitStamp(line.stamp)
   const worst = flags[0]
   const hasFocus = focus && line.orders.some(o => String(o.id) === String(focus))
@@ -380,6 +398,9 @@ function OrderLine({ line, isOpen, onToggle, flags, focus, focusRef, now, today,
         </span>
         <span className="flex-1 min-w-0">
           <span className="block text-sm text-ink leading-snug">{name}</span>
+          {showStatus && line.orders.some(o => statusOf(o) !== 'New order') && (
+            <span className="block text-[11px] text-ink/50 mt-0.5">{statusCounts(line.orders)}</span>
+          )}
           {worst && <StockFlag c={worst} more={flags.length - 1} />}
         </span>
         <span className="shrink-0 text-right">
@@ -395,6 +416,7 @@ function OrderLine({ line, isOpen, onToggle, flags, focus, focusRef, now, today,
             <div key={o.id} className={`flex items-center gap-2 text-xs ${String(o.id) === String(focus) ? 'font-semibold text-royal-700' : 'text-ink/65'}`}>
               <span className="tabular-nums truncate">{o.ref || o.order_number}</span>
               {o.channel && <span className="text-ink/35 shrink-0">{o.channel}</span>}
+              {showStatus && <span className={`shrink-0 px-1.5 py-px rounded text-[11px] font-medium ${STATUS_TONE[statusOf(o)] || 'bg-ink/5 text-ink/60'}`}>{statusOf(o)}</span>}
               {o.phase === 'new' && o.ship_day && o.ship_day < today && <span className="text-loss shrink-0">due {shortDay(o.ship_day)}</span>}
               <span className="ml-auto tabular-nums text-ink/40 shrink-0">{labelled ? `labelled ${ago(o.labelled_at, now)} ago` : ago(o.order_date, now)}</span>
               {canClear && (
