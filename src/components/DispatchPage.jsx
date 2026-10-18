@@ -2027,7 +2027,8 @@ function LabelImage({ label, compact = false, className = '' }) {
 
 function BatchCard({ file, statOf, picked, printing, responsible, onPick, onPrintBatch, onPrintGroup, onOpenGroup, onDispatch, onPack, onPickList, onSubstitute }) {
   const g = file.groups
-  const [open, setOpen] = useState(g.length <= 12)
+  // What's in the batch (product × labels) is the overview the warehouse works from: always shown to start with
+  const [open, setOpen] = useState(true)
   const tally = g.reduce((t, x) => {
     const st = statOf(x)
     if (!x.printed_at) t.toPrint += st.ready
@@ -2103,6 +2104,11 @@ function BatchCard({ file, statOf, picked, printing, responsible, onPick, onPrin
           )}
         </div>
       </div>
+      <button className="w-full flex items-center justify-between gap-2 px-4 py-2 border-t border-rule bg-paper/60 text-xs font-semibold text-ink/55 hover:text-royal-600 hover:bg-sky/20"
+        onClick={() => setOpen(o => !o)} aria-expanded={open}>
+        <span>What's in this batch · {plural(g.length, 'product')} · {plural(tally.total, 'label')}</span>
+        <span className="inline-flex items-center gap-1">{open ? 'Hide' : 'Show'}<Icon name="chevronDown" size={14} className={`transition-transform ${open ? 'rotate-180' : ''}`} /></span>
+      </button>
       {open && (
         <ul className="border-t border-rule divide-y divide-rule/70">
           {g.map(x => {

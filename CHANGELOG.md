@@ -3,6 +3,12 @@
 Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
+## v2.32.1 — 18 Oct 2026
+- Dispatch: each batch shows what's in it again (every product and its number of labels) as soon as
+  the page opens, as it did before the redesign. Since v2.31.0 a batch with more than 12 products
+  started folded away, and the only way to open it was tapping the batch code. A clear
+  "What's in this batch · Show / Hide" bar now sits under each batch
+
 ## v2.32.0 — 18 Oct 2026
 - New: Warehouse → Delivery tracking. Every parcel HELM booked in the last 30 days, as the courier
   sees it, refreshed from HELM every half hour (read only, nothing is written to HELM)
