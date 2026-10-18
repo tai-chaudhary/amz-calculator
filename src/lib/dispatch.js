@@ -433,7 +433,8 @@ export function autoMapping(items, labelCount, codeInfo) {
   for (const it of items) {
     const info = codeInfo.get(normRef(it.code))
     if (!info || !['own', 'verified'].includes(info.status) || !(info.items || []).length) {
-      unverified.push({ code: it.code, name: it.name, qty: it.qty, status: info?.status || 'unknown', suggest: info?.items || [] })
+      unverified.push({ code: it.code, name: it.name, qty: it.qty, status: info?.status || 'unknown', suggest: info?.items || [],
+        offer: Array.isArray(info?.suggest) && info.suggest.length ? { items: info.suggest, kind: info.suggest_kind || 'same', wanted: info.suggest_wanted || '' } : null })
       continue
     }
     if (info.kind === 'substitute' && info.wanted_name) instead.add(info.wanted_name)

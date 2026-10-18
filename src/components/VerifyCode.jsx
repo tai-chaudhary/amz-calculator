@@ -199,7 +199,8 @@ export function CodesToVerify({ codes, me, showToast, onVerified, prefill = {} }
             <div className="min-w-0 flex-1">
               <div className="text-sm text-ink leading-snug">{c.name || c.code}</div>
               <div className="text-[11px] text-ink/45 font-mono truncate">{c.code}{c.orders ? ` · ${c.orders} order${c.orders === 1 ? '' : 's'}` : ''}</div>
-              {c.status === 'unverified' && c.suggest?.length > 0 && <div className="text-[11px] text-ink/50">HELM: {c.suggest.map(s => `${s.qty} × ${s.name}`).join(' + ')}</div>}
+              {c.offer && <div className="text-[11px] text-royal-700">Suggested: {c.offer.items.map(s => `${s.qty} × ${s.name || s.code}`).join(' + ')}{c.offer.kind === 'substitute' ? ' (sent instead)' : ''}</div>}
+              {!c.offer && c.status === 'unverified' && c.suggest?.length > 0 && <div className="text-[11px] text-ink/50">HELM: {c.suggest.map(s => `${s.qty} × ${s.name}`).join(' + ')}</div>}
               {c.status === 'broken' && <div className="text-[11px] text-loss">Was verified, but its product has gone — check it again</div>}
             </div>
             {allowed
@@ -209,7 +210,7 @@ export function CodesToVerify({ codes, me, showToast, onVerified, prefill = {} }
         ))}
       </div>
       {open && (
-        <VerifyCode code={open.code} slipName={open.name} suggest={open.suggest} initial={prefill[normRef(open.code)] || null} me={me} showToast={showToast}
+        <VerifyCode code={open.code} slipName={open.name} suggest={open.suggest} initial={prefill[normRef(open.code)] || open.offer || null} me={me} showToast={showToast}
           onClose={() => setOpen(null)} onSaved={() => { setOpen(null); onVerified?.() }} />
       )}
     </>

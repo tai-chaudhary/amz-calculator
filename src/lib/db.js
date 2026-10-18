@@ -1427,3 +1427,5 @@ export async function loadDespatchErrors() {
   if (error) return []
   return data || []
 }
+/** Codes on open orders that aren't our SKUs and nobody has verified, with how many orders wait on each. */
+export const loadCodesToVerify = () => rpc('inv_codes_to_verify')

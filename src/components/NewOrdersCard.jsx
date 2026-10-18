@@ -243,8 +243,8 @@ export default function NewOrdersCard({ me, mappings = [], names = new Map(), fo
             {late.length > 0 && <button className="pill pill-alert" onClick={() => { setOpen(true); setView('late') }}>{late.length} past ship-by</button>}
             {shortCount > 0 && <span className="pill pill-alert">{plural(shortCount, 'product')} short</span>}
             {missingCount > 0 && (
-              <span className="pill bg-warn/10 text-warn border-warn/25" title="HELM sent item codes that aren't linked to an inventory product — fix the link in HELM. Until then there's no stock check for them">
-                {missingCount} not linked in HELM
+              <span className="pill bg-warn/10 text-warn border-warn/25" title="Codes that aren't one of our SKUs and nobody has verified — verify them in Inventory → Item codes. Until then there's no stock check for them">
+                {missingCount} not linked to our products
               </span>
             )}
             {fresh.length > 0 && oldestHrs >= 24 && <span className={`pill ${oldestHrs >= 48 ? 'pill-alert' : 'bg-warn/10 text-warn border-warn/25'}`}>oldest {ago(oldest, now)}</span>}
@@ -444,7 +444,7 @@ function StockFlag({ c, more = 0, named = false }) {
     ? `${who}short — need ${fmt(c.need)}, ${fmt(c.free)} in stock`
     : c.level === 'topup'
       ? `${who}top up the pick shelf — need ${fmt(c.need)}, ${fmt(c.pickFree)} on it`
-      : `${named ? `${c.code}: ` : ''}not linked in HELM — no stock check`
+      : `${named ? `${c.code}: ` : ''}not linked to our products — no stock check`
   const tone = c.level === 'short' ? 'text-loss' : 'text-warn'
   return (
     <span className={`block text-xs mt-0.5 ${tone}`}>

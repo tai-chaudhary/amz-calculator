@@ -4,11 +4,12 @@ import { StockChange, PickBadge, HelmFlag, LocationInput, WhoSelect, useWho, num
 import { DamagesView, ValueView } from './InventoryReports'
 import { AskForm } from './StockRequestsPage'
 import InventorySetup from './InventorySetup'
+import ItemCodes from './ItemCodes'
 import {
   AISLES, baysIn, parseLocation, byLocation, shelfLabel, cleanLocation, stockState, STATE_LABEL, needsRestock,
   fmtUnits, fmtDays, matchesProduct, MOVEMENT_LABEL, requestPrefill,
 } from '../lib/inventory'
-import { loadMovements, loadProductOrders, loadDespatchDays, invSaveLocation, invSaveProduct, invAssign } from '../lib/db'
+import { loadMovements, loadProductOrders, loadDespatchDays, invSaveLocation, invSaveProduct, invAssign, loadCodesToVerify } from '../lib/db'
 
 // HELM orders not uploaded to Dispatch yet
 const ORDER_PHASE = { new: 'new order in HELM', labelled: 'labelled, not uploaded', backorder: 'back order in HELM', hold: 'on hold in HELM' }
@@ -35,6 +36,8 @@ const FILTERS = [
 export default function InventoryPage({ me, inventory, people = [], focusId, office = false, canEdit = false, stockItems = [], showToast, onRefresh, onNavigate,
   canRequest = false, canOrder = false, requests = [], requestProducts = [], onRaise }) {
   const [view, setView] = useState('stock')
+  const [codesToVerify, setCodesToVerify] = useState(null)
+  useEffect(() => { loadCodesToVerify().then(r => setCodesToVerify((r || []).length)).catch(() => {}) }, [])
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState('all')
   const [sort, setSort] = useState('name')
@@ -89,6 +92,7 @@ export default function InventoryPage({ me, inventory, people = [], focusId, off
     { id: 'despatched', label: 'Despatched', count: null },
     { id: 'damages', label: 'Damages', count: inventory?.meta?.damages_open || null },
     { id: 'history', label: 'History', count: null },
+    { id: 'codes', label: 'Item codes', count: codesToVerify || null },
     ...(office ? [{ id: 'value', label: 'Value', count: null }, { id: 'setup', label: 'Set up', count: null }] : []),
   ]
   const common = { me, people, office, locations, products, showToast }
@@ -208,6 +212,7 @@ export default function InventoryPage({ me, inventory, people = [], focusId, off
       {view === 'shelves' && <ShelvesView {...common} onOpenShelf={setOpenShelf} onOpenProduct={setOpenId} />}
       {view === 'despatched' && <DespatchedView onOpenProduct={setOpenId} />}
       {view === 'history' && <HistoryView products={products} onOpenProduct={setOpenId} />}
+      {view === 'codes' && <ItemCodes me={me} showToast={showToast} onCount={setCodesToVerify} />}
       {view === 'damages' && <DamagesView {...common} refreshKey={damageKey} onReport={() => setDamage({})} onOpenProduct={setOpenId} onRefresh={onRefresh} />}
       {view === 'value' && office && <ValueView me={me} products={products} showToast={showToast} onOpenProduct={setOpenId} />}
       {view === 'setup' && office && <InventorySetup {...common} inventory={inventory} stockItems={stockItems} onRefresh={onRefresh} onDone={() => { onRefresh?.(); setView('stock') }} />}

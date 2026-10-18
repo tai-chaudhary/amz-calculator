@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react'
 import { PageHeader, Icon, StatusBadge, SegmentedControl, EmptyState, Modal } from './UI'
 import { StockChange, WhoSelect, useWho, CountShelf } from './InventoryParts'
 import { fmtUnits, needsPickShelf } from '../lib/inventory'
-import { invDismissTask } from '../lib/db'
+import { invDismissTask, loadCodesToVerify } from '../lib/db'
+import { CodesToVerify } from './VerifyCode'
+import { asCode } from './ItemCodes'
+import { canDo } from '../lib/access'
 
 const when = (d) => (d ? new Date(d).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
 
@@ -16,6 +19,11 @@ export default function WarehouseTasksPage({ me, inventory, people = [], office 
   const [doing, setDoing] = useState(null)
   const [skipping, setSkipping] = useState(null)
   const [counting, setCounting] = useState(null)
+  // Codes on open orders nobody has verified: for the people who can verify them
+  const [codes, setCodes] = useState([])
+  const linker = canDo(me, 'link-codes')
+  const loadCodes = () => { if (linker) loadCodesToVerify().then(r => setCodes((r || []).map(asCode))).catch(() => {}) }
+  useEffect(() => { loadCodes() }, [linker]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     onRefresh?.()
     const t = setInterval(() => onRefresh?.(), 60000)
@@ -46,6 +54,14 @@ export default function WarehouseTasksPage({ me, inventory, people = [], office 
         <SegmentedControl label="Show" value={view} onChange={setView}
           items={[{ id: 'open', label: 'To do', count: open.length }, { id: 'done', label: 'Done lately', count: done.length }]} />
       </div>
+
+      {view === 'open' && codes.length > 0 && (
+        <div className="panel-alert mb-3">
+          <div className="text-sm font-semibold text-ink">Item codes to verify ({codes.length})</div>
+          <div className="text-xs text-ink/55 mt-0.5 mb-2">On open orders, not one of our SKUs, and nobody has said what they are. Their orders wait in On hold until they're verified.</div>
+          <CodesToVerify codes={codes} me={me} showToast={showToast} onVerified={loadCodes} />
+        </div>
+      )}
 
       {view === 'open' && noPick.length > 0 && (
         <div className="panel-notice mb-3">

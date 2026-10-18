@@ -128,6 +128,9 @@ export function PickList({ title, subtitle, batchIds, people = [], me, showToast
                       <div className="flex-1 min-w-0 px-3 py-3">
                         <div className={`text-sm font-medium text-ink leading-snug ${isDone ? 'line-through' : ''}`}>{l.name}</div>
                         <div className="text-[11px] text-ink/40 tabular-nums truncate">{l.code} · {plural(l.orders, 'order')}</div>
+                        {(l.instead || []).length > 0 && (
+                          <div className="text-[11px] text-warn mt-0.5">Sent instead of {l.instead.join(', ')}</div>
+                        )}
                         {l.plan.stops.slice(1).map(s => (
                           <div key={s.code} className="text-xs text-ink/65 mt-1">then <b className="tabular-nums">{fmt(s.qty)}</b> from <b className="font-mono">{s.code}</b>{s.pickable ? '' : ' (overflow)'}</div>
                         ))}
@@ -163,8 +166,8 @@ export function PickList({ title, subtitle, batchIds, people = [], me, showToast
 
           {unlinked.length > 0 && (
             <div className="panel-notice mt-4">
-              <div className="text-sm font-semibold text-ink">Not linked in HELM ({unlinked.length})</div>
-              <div className="text-xs text-ink/55 mb-2">These item codes aren’t linked to an inventory product, so there’s no shelf to show. Find them by name — and fix the link in HELM.</div>
+              <div className="text-sm font-semibold text-ink">Not linked to our products ({unlinked.length})</div>
+              <div className="text-xs text-ink/55 mb-2">These codes aren’t one of our SKUs and nobody has verified them, so there’s no shelf to show and no stock comes off. Ask someone who can link item codes to verify them (Inventory → Item codes).</div>
               {unlinked.map(u => (
                 <div key={u.key} className="flex items-baseline justify-between gap-3 py-1.5 border-t border-rule/70 text-sm">
                   <span className="min-w-0"><span className="block text-ink leading-snug">{u.name}</span><span className="block text-[11px] text-ink/40 font-mono truncate">{u.code}</span></span>

@@ -2197,10 +2197,17 @@ function BatchCard({ file, statOf, picked, printing, responsible, onPick, onPrin
               <li key={x.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-sky/20 cursor-pointer" onClick={() => onOpenGroup(x)}>
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium text-ink leading-snug">{x.label_name}</div>
+                  {x.contents && x.contents.toUpperCase() !== x.label_name.toUpperCase() && (() => {
+                    // What comes off stock for it; and, flagged, the listing it's sent instead of
+                    const [stock, instead] = String(x.contents).split(' · sent instead of ')
+                    return (
+                      <div className="text-xs text-ink/45 mt-0.5">
+                        {stock}{instead && <span className="block text-warn">Sent instead of {instead}</span>}
+                      </div>
+                    )
+                  })()}
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
-                    <span className="text-xs text-ink/45">
-                      {x.contents && x.contents.toUpperCase() !== x.label_name.toUpperCase() ? `${x.contents} · ` : ''}{x.carrier} {x.service}
-                    </span>
+                    <span className="text-xs text-ink/45">{x.carrier} {x.service}</span>
                     <span className="sm:hidden"><BatchStatus batch={x} stat={st} /></span>
                   </div>
                 </div>
