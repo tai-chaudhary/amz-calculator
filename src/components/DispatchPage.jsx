@@ -1546,8 +1546,8 @@ function EditMapping({ mapping, me, showToast, onClose, onSaved }) {
 /**
  * Tracking numbers that didn't come through when the labels were read (Evri's
  * picture labels, mostly). Reads just the tracking strip again on those
- * labels, enlarged, and fills in what it finds. HELM's numbers, when it has
- * them, are matched separately every minute and win over anything read here.
+ * labels, enlarged, and fills in what it finds. (HELM's API doesn't give
+ * tracking numbers out, so the labels are the only source.)
  */
 function TrackingRefill({ showToast, onLog, onDone }) {
   const [missing, setMissing] = useState(null)
@@ -1598,7 +1598,7 @@ function TrackingRefill({ showToast, onLog, onDone }) {
             <div className="text-xs text-ink/50 mt-1">Keep this page open until it finishes.</div>
           </>
         ) : run?.finished ? (
-          <><b>{run.found}</b> of {run.total} filled in.{missing?.length ? ` ${missing.length} still without one — HELM fills these in where it can.` : ''}</>
+          <><b>{run.found}</b> of {run.total} filled in.{missing?.length ? ` ${missing.length} still without one — the label couldn't be read clearly enough.` : ''}</>
         ) : (
           <><b>{missing.length} label{missing.length !== 1 ? 's' : ''}</b> from the last 14 days have no tracking number.
             <span className="text-ink/55"> Read them again to fill them in.</span></>

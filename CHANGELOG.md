@@ -4,10 +4,12 @@ Version shown at the bottom of the sidebar, with the time it was built.
 Minor versions (2.x) add features; patch versions (2.2.x) fix or refine.
 
 ## v2.31.4 — 18 Oct 2026
-- Tracking numbers from HELM: helm-sync now looks for each labelled order's tracking numbers in
-  HELM and checks them against the labels every minute. Same number: marked verified. Different
-  (one label, one number): HELM's is used and what was read is kept. None read: HELM's fills it in.
-  Anything less certain (several parcels) is left as it is
+- Checked whether HELM can supply tracking numbers: it can't, as things stand. Every labelled order has
+  a shipment in HELM, but HELM's API doesn't give out the tracking number (not on the order, the
+  shipment or its parcels), and shipments can't be looked up by order. helm-sync is ready for it
+  anyway: it looks for tracking numbers on what it reads, and when HELM has one it's checked against
+  the label every minute. Same: marked verified. Different (one label, one number): HELM's is used and
+  what was read is kept. None read: HELM's fills it in
 - Dispatch → Uploads (office): "Fill in tracking numbers" re-reads just the tracking strip on labels
   from the last 14 days that have none, enlarged, and fills in what it finds
 - Database: supabase/migrations/034_helm_tracking.sql (applied 18 Oct); helm-sync redeployed
