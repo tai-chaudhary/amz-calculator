@@ -1,0 +1,2954 @@
+import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react'
+import { EMPTY_CALC } from './lib/defaults'
+import { VERSION, BUILD_TIME } from './version'
+import { loadNicknames, nicknamesOn, setNicknamesOn, showNicknames } from './lib/nicknames'
+import { UndoPanel, UndoPill } from './components/Undo'
+import { startDateFormat } from './lib/dates'
+import { watchForUpdates, applyUpdate, busy, loadPage } from './lib/updates'
+import { parseHeliumExport } from './lib/hunter'
+import { heliumDateFromFile } from './lib/hunts'
+import { feeProposals, listProposals, cheaperSupplierProposals, rowsFromCatalogue, carrierProposals, supplierForName, purchaseCostProposals } from './lib/proposals'
+import { LinksProvider } from './components/Links'
+import { NAV, NAV_GROUPS, canAccess, visibleNav, pageLabel, landingPage, seesCosts } from './lib/access'
+import { resolvePackaging, poUnitCost, packUnitsOf, packsFor } from './lib/packaging'
+import { buildSearchItems, searchItems } from './lib/search'
+import NoAccess from './components/NoAccess'
+import { groupExpected, needsOffice as deliveryNeedsOffice, deliveryUnits } from './lib/goodsIn'
+import { URGENCY, requestState } from './lib/requests'
+import { pdfToText, canReadFile } from './lib/pdfText'
+import { parseInvoice } from './lib/invoiceParse'
+import { received as poReceived, nextRepeat, PO_CATEGORIES, directoryOf } from './lib/purchases'
+import { fillFromProducts, calcFromProduct } from './lib/autofill'
+import LoginPage from './components/LoginPage'
+import { Icon } from './components/UI'
+import { supabase } from './lib/supabase'
+import { calcProduct, fmt } from './lib/calc'
+import {
+  loadSettings, saveSettings,
+  loadProducts, saveProduct, updateProduct, deleteProduct, EditConflict, logActivity, loadActivity, loadSettingsRow,
+  loadMonths, saveMonth, updateMonth, deleteMonth,
+  loadOverheads, saveOverheads,
+  loadLiveProducts, pushProductLive, updateLiveProductStatus, removeLiveProduct,
+  loadPriceHistory, logPriceChange,
+  loadCostHistory, logCostChange,
+  loadStockItems, saveStockItem, updateStockItem, deleteStockItem,
+  loadProfiles, upsertProfile,
+  loadSuppliers, updateSupplier, createSupplier, loadSupplierProducts, saveSupplierProducts,
+  logPriceListImport, loadPriceListImports,
+  loadProposedChanges, addProposedChanges, decideProposedChanges,
+  loadMarketListings, saveMarketListings, loadAsinMatches, saveAsinMatch, deleteAsinMatch,
+  loadHunts, createHunt, updateHunt, loadHuntItems, updateHuntItems,
+  loadSyncStatus, triggerSupplierSync, adminUsers,
+  loadPurchaseOrders, nextPoNumber, nextCreditNumber, savePurchaseOrder, updatePurchaseOrder, updatePoItem, saveIssue, uploadPurchaseDoc, purchaseDocUrl,
+  loadCatalogueForStock, loadCatalogueForHunt, loadCatalogueStats, loadDispatchIndex,
+  loadStockRequests, loadRequestProducts, createStockRequest, updateStockRequest, addRequestEvent, requestsOnPo,
+  uploadRequestPhoto, requestPhotoUrl,
+  loadGoodsIn, bookInDelivery, logUnexpectedDelivery, updateDelivery, uploadGoodsInPhoto, goodsInPhotoUrl,
+  loadInventory, loadOpenParcels, loadClaims,
+} from './lib/db'
+import { stockState, needsRestock, needsPickShelf } from './lib/inventory'
+import { needsAttention } from './lib/tracking'
+
+
+// Each page is its own download, fetched the first time it's opened (and
+// quietly in the background once the portal has loaded), so signing in only
+// waits for the shell rather than every page at once.
+const PAGE_MODULES = {
+  calculator: () => import('./components/CalculatorPage'),
+  dashboard: () => import('./components/DashboardPage'),
+  saved: () => import('./components/SavedPage'),
+  approvals: () => import('./components/ApprovalsPage'),
+  live: () => import('./components/LiveProductsPage'),
+  hunter: () => import('./components/HunterPage'),
+  stock: () => import('./components/StockItemsPage'),
+  suppliers: () => import('./components/SuppliersPage'),
+  brands: () => import('./components/PortfolioPage'),
+  purchases: () => import('./components/PurchasesPage'),
+  payments: () => import('./components/PaymentsPages'),
+  dispatch: () => import('./components/DispatchPage'),
+  requests: () => import('./components/StockRequestsPage'),
+  'goods-in': () => import('./components/GoodsInPage'),
+  inventory: () => import('./components/InventoryPage'),
+  tasks: () => import('./components/WarehouseTasksPage'),
+  tracking: () => import('./components/TrackingPage'),
+  claims: () => import('./components/ClaimsPage'),
+  'stock-planning': () => import('./components/StockPlanningPage'),
+  'not-listed': () => import('./components/NotListedPage'),
+  'print-station': () => import('./components/PrintStationPage'),
+  'order-audit': () => import('./components/OrderAuditPage'),
+  'customer-care': () => import('./components/CustomerCarePage'),
+  returns: () => import('./components/ReturnsPage'),
+  families: () => import('./components/FamiliesPage'),
+  shipping: () => import('./components/ShippingPage'),
+  packaging: () => import('./components/PackagingPage'),
+  buildmonth: () => import('./components/BuildMonthPage'),
+  overheads: () => import('./components/OverheadsPage'),
+  bulk: () => import('./components/BulkUploadPage'),
+  archive: () => import('./components/ArchivePage'),
+  settings: () => import('./components/SettingsPage'),
+  team: () => import('./components/TeamPage'),
+  notifications: () => import('./components/NotificationsPage'),
+}
+PAGE_MODULES.carriers = PAGE_MODULES.companies = PAGE_MODULES.suppliers
+PAGE_MODULES.issues = PAGE_MODULES.payments
+PAGE_MODULES['dispatch-dashboard'] = PAGE_MODULES.dispatch
+const prefetchPage = (id) => { PAGE_MODULES[id]?.().catch(() => {}) }
+
+const lazyPage = (id, name = 'default') => lazy(() => loadPage(PAGE_MODULES[id]).then(m => ({ default: m[name] })))
+const CalculatorPage = lazyPage('calculator')
+const DashboardPage = lazyPage('dashboard')
+const SavedPage = lazyPage('saved')
+const ApprovalsPage = lazyPage('approvals')
+const LiveProductsPage = lazyPage('live')
+const HunterPage = lazyPage('hunter')
+const StockItemsPage = lazyPage('stock')
+const SuppliersPage = lazyPage('suppliers')
+const PortfolioPage = lazyPage('brands')
+const PurchasesPage = lazyPage('purchases')
+const PaymentsPage = lazyPage('payments', 'PaymentsPage')
+const IssuesPage = lazyPage('payments', 'IssuesPage')
+const DispatchPage = lazyPage('dispatch')
+const DispatchDashboardPage = lazyPage('dispatch', 'DispatchDashboardPage')
+const DispatchJobsPill = lazyPage('dispatch', 'DispatchJobsPill')
+const StockRequestsPage = lazyPage('requests')
+const GoodsInPage = lazyPage('goods-in')
+const InventoryPage = lazyPage('inventory')
+const WarehouseTasksPage = lazyPage('tasks')
+const TrackingPage = lazyPage('tracking')
+const ClaimsPage = lazyPage('claims')
+const StockPlanningPage = lazyPage('stock-planning')
+const NotListedPage = lazyPage('not-listed')
+const PrintStationPage = lazyPage('print-station')
+const OrderAuditPage = lazyPage('order-audit')
+const CustomerCarePage = lazyPage('customer-care')
+const ReturnsPage = lazyPage('returns')
+const FamiliesPage = lazyPage('families')
+const ShippingPage = lazyPage('shipping')
+const PackagingPage = lazyPage('packaging')
+const BuildMonthPage = lazyPage('buildmonth')
+const OverheadsPage = lazyPage('overheads')
+const BulkUploadPage = lazyPage('bulk')
+const ArchivePage = lazyPage('archive')
+const SettingsPage = lazyPage('settings')
+const TeamPage = lazyPage('team')
+const NotificationsPage = lazyPage('notifications')
+const PurchaseOrderDrawer = lazy(() => loadPage(() => import('./components/PurchaseOrderDrawer')))
+const PoBuilder = lazy(() => loadPage(() => import('./components/PoBuilder')))
+const SkuPrompt = lazy(() => loadPage(() => import('./components/SkuPrompt')))
+const AttachDocuments = lazy(() => loadPage(() => import('./components/AttachDocuments')))
+const AddCompany = lazy(() => loadPage(() => import('./components/AddCompany')))
+
+const Spinner = () => (
+  <div className="flex items-center justify-center h-64" role="status" aria-label="Loading">
+    <div className="w-8 h-8 border-2 border-royal-500 border-t-transparent rounded-full animate-spin" />
+  </div>
+)
+
+
+// The bottom tabs on phones: which pages, in what order, and shorter names where needed
+const TAB_ORDER = ['dispatch', 'tasks', 'inventory', 'goods-in', 'requests', 'tracking']
+const TAB_LABEL = { 'goods-in': 'Goods in', requests: 'Requests', tracking: 'Tracking', 'dispatch-dashboard': 'Post Dispatch' }
+
+// Old destinations still work: they land on where that job lives now
+const REDIRECTS = {
+  review: ['approvals', 'listings'],
+  changes: ['approvals', 'changes'],
+  pricelists: ['suppliers', null],
+}
+
+
+
+export default function App() {
+  const [session, setSession] = useState(undefined)
+  // Page lives in the URL hash so refresh, back/forward and bookmarks all work
+  const VALID_PAGES = NAV.map(n => n.id)
+  const parseHash = () => {
+    const raw = (window.location.hash || '').replace(/^#\/?/, '')
+    const [h, qs] = raw.split('?')
+    const focus = new URLSearchParams(qs || '').get('focus') || null
+    if (REDIRECTS[h]) return { page: REDIRECTS[h][0], focus: focus || REDIRECTS[h][1] }
+    return { page: VALID_PAGES.includes(h) ? h : 'dashboard', focus }
+  }
+  const [page, setPageState] = useState(() => parseHash().page)
+  const [focusId, setFocusId] = useState(() => parseHash().focus)
+
+  const setPage = useCallback((next) => {
+    setPageState(next)
+    setFocusId(null)
+    const target = `#/${next}`
+    if (window.location.hash !== target) window.location.hash = target
+  }, [])
+
+  // Jump to a specific record on another page
+  const navigateTo = useCallback((requested, requestedId) => {
+    const [nextPage, id] = REDIRECTS[requested]
+      ? [REDIRECTS[requested][0], requestedId || REDIRECTS[requested][1]]
+      : [requested, requestedId]
+    setPageState(nextPage)
+    setFocusId(id || null)
+    window.location.hash = id ? `#/${nextPage}?focus=${id}` : `#/${nextPage}`
+  }, [])
+
+  // Respond to back/forward and manual hash edits
+  useEffect(() => {
+    const onHashChange = () => {
+      const { page: p, focus } = parseHash()
+      setPageState(p); setFocusId(focus)
+    }
+    window.addEventListener('hashchange', onHashChange)
+    // Normalise the URL on first load
+    if (!window.location.hash) window.location.replace(`#/${parseHash().page}`)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+
+  // Scroll to top only on a genuine page change
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'instant' }) }, [page])
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Laptops: the menu can be slid away for a full-width page, and brought back with one click (remembered)
+  const [railHidden, setRailHidden] = useState(() => { try { return localStorage.getItem('gg-sidebar-hidden') === '1' } catch { return false } })
+  const toggleRail = () => setRailHidden(h => { const n = !h; try { localStorage.setItem('gg-sidebar-hidden', n ? '1' : '0') } catch { /* private mode */ } return n })
+  const [undoPing, setUndoPing] = useState(0)
+  // The page behind the open menu shouldn't scroll along with it on a phone
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [sidebarOpen])
+  const [commandOpen, setCommandOpen] = useState(false)
+  const [commandQuery, setCommandQuery] = useState('')
+  const [commandIndex, setCommandIndex] = useState(0)
+  useEffect(() => { setCommandIndex(0) }, [commandQuery, commandOpen])
+  // null until it loads from the database. Anything above the `!settings` gate
+  // further down runs on the first render, so read it with `settings?.` there
+  // — a plain `settings.x` crashes the whole app to a blank page.
+  const [rawSettings, setSettings] = useState(null)
+  const [savedProducts, setSavedProducts] = useState([])
+  const [months, setMonths] = useState([])
+  const [overheads, setOverheads] = useState([])
+  const [liveProducts, setLiveProducts] = useState([])
+  const [priceHistory, setPriceHistory] = useState([])
+  const [costHistory, setCostHistory] = useState([])
+  const [stockItems, setStockItems] = useState([])
+  // Packaging types built from real packaging items get their cost and weight from those items
+  const settings = useMemo(() => resolvePackaging(rawSettings, stockItems), [rawSettings, stockItems])
+  const [skuAsk, setSkuAsk] = useState(null)        // { items, listingName, resolve } — SKUs asked for on approval
+
+  // The version of each record this portal last read or wrote. A deliberate
+  // edit is only saved if nobody else has saved that record in the meantime —
+  // our own saves move the version too, so they never look like someone else's.
+  const versions = React.useRef(new Map())
+  const seedVersions = (rows, prefix) => rows.forEach(r => {
+    const k = prefix + r.id
+    if (r.updated_at && !versions.current.has(k)) versions.current.set(k, r.updated_at)
+  })
+  const writeProduct = React.useCallback(async (id, data, { check = false } = {}) => {
+    const row = await updateProduct(id, data, check ? versions.current.get('p' + id) : undefined)
+    if (row?.updated_at) versions.current.set('p' + id, row.updated_at)
+    return row
+  }, [])
+  const writeStockItem = React.useCallback(async (id, data, { check = false } = {}) => {
+    const row = await updateStockItem(id, data, check ? versions.current.get('s' + id) : undefined)
+    if (row?.updated_at) versions.current.set('s' + id, row.updated_at)
+    return row
+  }, [])
+  const [suppliers, setSuppliers] = useState([])
+  const [supplierProducts, setSupplierProducts] = useState([])
+  const [priceImports, setPriceImports] = useState([])
+  const [proposals, setProposals] = useState([])
+  const [marketListings, setMarketListings] = useState([])
+  const [marketLoaded, setMarketLoaded] = useState(false)
+  const [asinMatches, setAsinMatches] = useState([])
+  const [hunts, setHunts] = useState([])
+  const [huntItems, setHuntItems] = useState([])
+  const [syncStatus, setSyncStatus] = useState({ states: [], runs: [] })
+  const [catalogueStats, setCatalogueStats] = useState([])
+  const [purchaseOrders, setPurchaseOrders] = useState([])
+  const [dispatchIndex, setDispatchIndex] = useState({ labels: [], batches: [] })
+  const [stockRequests, setStockRequests] = useState([])
+  const [requestProducts, setRequestProducts] = useState([])
+  const [goodsIn, setGoodsIn] = useState({ orders: [], deliveries: [] })
+  const [inventory, setInventory] = useState(null)
+  const [purchaseIssues, setPurchaseIssues] = useState([])
+  const [openPo, setOpenPo] = useState(null)
+  const [poDraft, setPoDraft] = useState(null)
+  const [addingCompany, setAddingCompany] = useState(null)
+  const [attachingDocs, setAttachingDocs] = useState(false)
+  const [profiles, setProfiles] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [toast, setToast] = useState(null)
+  // A newer release than the one running (phones keep the portal open for days)
+  const [update, setUpdate] = useState(null)
+  useEffect(() => watchForUpdates(setUpdate), [])
+  // Browsers discard background tabs to save memory and reload them on return.
+  // We can't stop that, so we keep in-progress work in sessionStorage and put
+  // it straight back — a reload becomes invisible instead of destructive.
+  const WORKSPACE_KEY = 'gg.workspace.v1'
+  const restored = (() => {
+    try { return JSON.parse(sessionStorage.getItem(WORKSPACE_KEY) || 'null') } catch { return null }
+  })()
+
+  const [calc, setCalc] = useState(restored?.calc || EMPTY_CALC)
+  const [loadedProductId, setLoadedProductId] = useState(restored?.loadedProductId || null)
+  const [loadedProductName, setLoadedProductName] = useState(restored?.loadedProductName || '')
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setCommandOpen(open => !open)
+      }
+      if (event.key === 'Escape') { setCommandOpen(false); setSidebarOpen(false) }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  // Who's signed in — used to stamp every logged action
+  const me = useMemo(() => {
+    if (!session?.user) return null
+    const prof = profiles.find(p => p.id === session.user.id)
+    const email = session.user.email || ''
+    return {
+      id: session.user.id,
+      email,
+      name: prof?.display_name || email.split('@')[0] || 'Unknown',
+      role: prof?.role || 'member',
+      permissions: Array.isArray(prof?.permissions) ? prof.permissions : [],
+      // Someone with no profile yet has no access until an admin grants it
+      active: prof ? prof.active !== false : false,
+      hasProfile: !!prof,
+    }
+  }, [session, profiles])
+
+  const allowed = canAccess(me, page)
+
+  // Shows how current the screen is, ticking over on its own
+  const [lastRefresh, setLastRefresh] = useState(Date.now())
+  const [, tick] = useState(0)
+  useEffect(() => { const t = setInterval(() => tick(n => n + 1), 30000); return () => clearInterval(t) }, [])
+  const minsOld = Math.floor((Date.now() - lastRefresh) / 60000)
+  const freshnessLabel = minsOld < 1 ? 'up to date' : minsOld < 60 ? `${minsOld}m ago` : `${Math.floor(minsOld / 60)}h ago`
+
+  // Send people to a section they can actually use, rather than a blocked page
+  useEffect(() => {
+    if (loading || !session || !me) return
+    if (allowed) return
+    const home = landingPage(me)
+    // Nothing at all? They stay put and are told so, rather than bounced around
+    if (home && home !== page) navigateTo(home)
+  }, [loading, session, me, page, allowed, navigateTo])
+
+  // Everything significant goes in one audit trail: who, what, when, and to what
+  // Reads the current user at the moment of logging, so handlers created
+  // before sign-in finished still record who did it
+  const meRef = React.useRef(me)
+  meRef.current = me
+  const log = useCallback((entry) => {
+    logActivity({ user_name: meRef.current?.name || null, ...entry,
+      entity_id: entry.entity_id != null ? String(entry.entity_id) : null })
+  }, [])
+
+  const nameFor = useCallback((userId, fallback) => {
+    if (!userId) return fallback || null
+    const prof = profiles.find(p => p.id === userId)
+    return prof?.display_name || fallback || 'Unknown'
+  }, [profiles])
+
+  const stamp = useCallback(() => ({
+    userId: me?.id || null,
+    userName: me?.name || null,
+    at: new Date().toISOString(),
+  }), [me])
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(WORKSPACE_KEY, JSON.stringify({ calc, loadedProductId, loadedProductName }))
+    } catch { /* private mode or quota — not worth interrupting anyone over */ }
+  }, [calc, loadedProductId, loadedProductName])
+
+  // Tabs are often frozen without warning; this is the last reliable moment to save
+  useEffect(() => {
+    const save = () => {
+      try {
+        sessionStorage.setItem(WORKSPACE_KEY, JSON.stringify({ calc, loadedProductId, loadedProductName }))
+      } catch { /* ignore */ }
+    }
+    document.addEventListener('visibilitychange', save)
+    window.addEventListener('pagehide', save)
+    return () => {
+      document.removeEventListener('visibilitychange', save)
+      window.removeEventListener('pagehide', save)
+    }
+  }, [calc, loadedProductId, loadedProductName])
+
+  const toastTimer = React.useRef(null)
+  const [undoOpen, setUndoOpen] = useState(false)
+  // Every date on screen reads DD-MM-YYYY (core rule)
+  useEffect(() => { startDateFormat() }, [])
+  // Messages from outside React (the Print Station: sent, printing, printed)
+  useEffect(() => {
+    const on = (e) => showToastRef.current?.(e.detail?.msg, e.detail?.type, e.detail?.action)
+    window.addEventListener('gg-toast', on)
+    return () => window.removeEventListener('gg-toast', on)
+  }, [])
+  const showToastRef = useRef(null)
+  const showToast = (msg, type = 'success', action = null) => {
+    clearTimeout(toastTimer.current)
+    // Anything done can be undone for 5 minutes: success messages offer it unless they have their own button
+    if (!action && type === 'success' && session && msg !== 'Undone') action = { label: 'Undo', run: () => setUndoOpen(true) }
+    if (type === 'success') setUndoPing(n => n + 1)
+    setToast({ msg, type, action })
+    toastTimer.current = setTimeout(() => setToast(null), action ? 8000 : 3500)
+  }
+  showToastRef.current = showToast
+
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, next) => {
+      // Returning to the tab fires TOKEN_REFRESHED / SIGNED_IN with a brand-new
+      // session object for the same person. Reacting to those would reload every
+      // table, so only a real change of user is allowed through.
+      if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') return
+      setSession(prev => {
+        if (prev?.user?.id && prev.user.id === next?.user?.id) return prev
+        return next
+      })
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    if (!session) { setLoading(false); return }
+    async function init() {
+      setLoading(true)
+      try {
+        // Market listings (every Helium row ever imported) are only used by
+        // Product Hunter, so they load when that page is first opened instead.
+        const [s, p, m, o, lp, ph, ch, sti, prof, sup, spr, imp, pc, am, hs, hi, ss, po] = await Promise.all([
+          loadSettings(), loadProducts(), loadMonths(), loadOverheads(), loadLiveProducts(), loadPriceHistory(), loadCostHistory(), loadStockItems(), loadProfiles(),
+          loadSuppliers(), loadCatalogueStats(), loadPriceListImports(), loadProposedChanges(),
+          loadAsinMatches(), loadHunts(), loadHuntItems(), loadSyncStatus(), loadPurchaseOrders()
+        ])
+        setSettings(s)
+        setSavedProducts(p)
+        seedVersions(p, 'p')
+        setMonths(m)
+        setOverheads(o)
+        setLiveProducts(lp)
+        setPriceHistory(ph)
+        setCostHistory(ch)
+        setStockItems(sti)
+        seedVersions(sti, 's')
+        setProfiles(prof)
+        setSuppliers(sup)
+        setCatalogueStats(spr)
+        // Only the catalogue lines that match your own stock. It needs the stock
+        // list first, so it follows on without holding up the rest of the portal.
+        loadCatalogueForStock(sti).then(setSupplierProducts).catch(() => {})
+        setPriceImports(imp)
+        setProposals(pc)
+        setAsinMatches(am)
+        setHunts(hs)
+        setHuntItems(hi)
+        setSyncStatus(ss)
+        setPurchaseOrders(po.orders)
+        setPurchaseIssues(po.issues)
+        setLastRefresh(Date.now())
+      } catch {
+        showToast('Failed to load data.', 'error')
+      } finally {
+        setLoading(false)
+      }
+    }
+    init()
+  }, [session?.user?.id])
+
+  /**
+   * Keep the screen current. Everything used to load once at sign-in, so
+   * anyone who left the tab open saw yesterday's picture — listings other
+   * people sent for review simply never appeared. This quietly re-reads the
+   * things that change while you work: when you come back to the tab, and
+   * every couple of minutes while it's in front of you.
+   */
+  // Dispatch has its own page data; this is just enough for ⌘K and the menu count
+  const refreshDispatch = useCallback(async () => {
+    if (!canAccess(meRef.current, 'dispatch')) return
+    try { setDispatchIndex(await loadDispatchIndex()) } catch { /* search just won't show labels until next time */ }
+  }, [])
+  useEffect(() => { if (session && me) refreshDispatch() }, [session, me?.id, me?.permissions, refreshDispatch]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stock requests: the list, and the products that can be asked for (names only)
+  const refreshRequests = useCallback(async () => {
+    const who = meRef.current
+    if (!canAccess(who, 'requests') && !canAccess(who, 'purchases')) return
+    try {
+      const [list, prods] = await Promise.all([loadStockRequests(), loadRequestProducts()])
+      setStockRequests(list)
+      setRequestProducts(prods)
+    } catch { /* shown as empty until the next refresh */ }
+  }, [])
+  useEffect(() => { if (session && me) refreshRequests() }, [session, me?.id, me?.permissions, refreshRequests]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Goods in: what's coming (no prices) and what's been booked in
+  const refreshGoodsIn = useCallback(async () => {
+    const who = meRef.current
+    if (!canAccess(who, 'goods-in') && !canAccess(who, 'purchases')) return
+    try { setGoodsIn(await loadGoodsIn()) } catch { /* shown as empty until the next refresh */ }
+  }, [])
+  useEffect(() => { if (session && me) refreshGoodsIn() }, [session, me?.id, me?.permissions, refreshGoodsIn]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Inventory: stock, shelves and tasks, for the pages that use them and for search
+  const refreshInventory = useCallback(async () => {
+    const who = meRef.current
+    if (!['inventory', 'tasks', 'goods-in', 'requests'].some(id => canAccess(who, id))) return
+    try { setInventory(await loadInventory()) } catch { /* shown as empty until the next refresh */ }
+  }, [])
+  // Products and Inventory are one product: after linking or creating either side, both are loaded again
+  const reloadStockItems = useCallback(async () => {
+    try { setStockItems(await loadStockItems()) } catch { /* kept as they were */ }
+  }, [])
+  useEffect(() => { if (session && me) refreshInventory() }, [session, me?.id, me?.permissions, refreshInventory]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Delivery tracking: parcels still on their way, so the menu can count the late ones
+  const [openParcels, setOpenParcels] = useState([])
+  const refreshParcels = useCallback(async () => {
+    if (!canAccess(meRef.current, 'tracking')) return
+    setOpenParcels(await loadOpenParcels())
+  }, [])
+  useEffect(() => { if (session && me) refreshParcels() }, [session, me?.id, me?.permissions, refreshParcels]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Claims: the menu counts the ones still to raise, and ⌘K finds them
+  const [claimsIndex, setClaimsIndex] = useState([])
+  useEffect(() => {
+    if (!session || !me || !canAccess(me, 'claims')) return
+    loadClaims().then(setClaimsIndex).catch(() => {})
+  }, [session, me?.id, me?.permissions, page]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Nicknames: each person's own switch, on for the warehouse to start with, open to everyone
+  const [nickOn, setNickOn] = useState(false)
+  useEffect(() => {
+    if (!session || !me) return
+    const on = nicknamesOn(me, !seesCosts(me))
+    setNickOn(on)
+    loadNicknames().then(() => showNicknames(on))
+  }, [session, me?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const toggleNicknames = () => {
+    const on = !nickOn
+    setNickOn(on); setNicknamesOn(me, on); showNicknames(on)
+    showToast?.(on ? 'Showing nicknames — hover, or press and hold, for the full name' : 'Showing full product names')
+  }
+
+  const refreshing = React.useRef(false)
+  const refreshShared = useCallback(async ({ silent = true } = {}) => {
+    if (refreshing.current || !session || document.visibilityState !== 'visible') return
+    refreshing.current = true
+    try {
+      const [p, lp, pc, po, hs, hi, prof] = await Promise.all([
+        loadProducts(), loadLiveProducts(), loadProposedChanges(), loadPurchaseOrders(), loadHunts(), loadHuntItems(), loadProfiles(),
+      ])
+      setSavedProducts(p); seedVersions(p, 'p')
+      setLiveProducts(lp)
+      setProposals(pc)
+      setPurchaseOrders(po.orders)
+      setPurchaseIssues(po.issues)
+      setHunts(hs)
+      setHuntItems(hi)
+      setProfiles(prof)
+      refreshDispatch()
+      refreshParcels()
+      setLastRefresh(Date.now())
+    } catch {
+      if (!silent) showToast('Could not refresh — check your connection', 'error')
+    } finally {
+      refreshing.current = false
+    }
+  }, [session, refreshDispatch, refreshParcels])
+
+  useEffect(() => {
+    if (!session || loading) return
+    const onVisible = () => { if (document.visibilityState === 'visible') refreshShared() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    const timer = setInterval(() => refreshShared(), 120000)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+      clearInterval(timer)
+    }
+  }, [session, loading, refreshShared])
+
+  // Once the portal is up, fetch the pages this person can open while the
+  // browser is idle, so moving between them never waits on a download
+  useEffect(() => {
+    if (loading || !me) return
+    const ids = visibleNav(me).flatMap(g => g.items.map(i => i.id))
+    const idle = window.requestIdleCallback || ((fn) => setTimeout(fn, 1500))
+    const cancel = window.cancelIdleCallback || clearTimeout
+    let i = 0, handle
+    const next = () => { if (i < ids.length) { prefetchPage(ids[i++]); handle = idle(next) } }
+    handle = idle(next)
+    return () => cancel(handle)
+  }, [loading, me?.id, me?.permissions]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Product Hunter's market listings: fetched the first time the page is opened
+  useEffect(() => {
+    if (!session || page !== 'hunter' || marketLoaded) return
+    let cancelled = false
+    loadMarketListings()
+      .then(rows => { if (!cancelled) setMarketListings(prev => {
+        // Keep anything imported while this was loading
+        const byAsin = new Map(rows.map(r => [r.asin, r]))
+        prev.forEach(r => byAsin.set(r.asin, r))
+        return [...byAsin.values()]
+      }) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setMarketLoaded(true) })
+    return () => { cancelled = true }
+  }, [session, page, marketLoaded])
+
+  const settingsVersion = React.useRef(null)
+  const handleUpdateSettings = useCallback(async (newSettings) => {
+    try {
+      if (!settingsVersion.current) settingsVersion.current = (await loadSettingsRow())?.updated_at || null
+      const row = await saveSettings(newSettings, settingsVersion.current)
+      settingsVersion.current = row?.updated_at || null
+      setSettings(newSettings)
+      log({ entity_type: 'settings', entity_name: 'Carriers, packaging and routing', action: 'Settings saved' })
+      showToast('Settings saved')
+    } catch (e) {
+      if (e?.conflict && e.latest) {
+        settingsVersion.current = e.latest.updated_at
+        setSettings(e.latest.value)
+        showToast('Someone else saved Settings while you were editing. Their version is loaded — reapply your change and save again.', 'error')
+      } else showToast('Failed to save settings', 'error')
+    }
+  }, [])
+
+  const handleUpdateOverheads = useCallback(async (newOverheads) => {
+    setOverheads(newOverheads)
+    try { await saveOverheads(newOverheads); showToast('Overheads saved') }
+    catch { showToast('Failed to save overheads', 'error') }
+  }, [])
+
+  const handleSaveProduct = useCallback(async (product) => {
+    try {
+      const s = stamp()
+      const row = await saveProduct({
+        ...product,
+        createdBy: s.userId, createdByName: s.userName, createdAt: s.at,
+      })
+      setSavedProducts((prev) => [row, ...prev])
+      log({ entity_type: 'listing', entity_id: row.id, entity_name: product.name, action: 'Created' })
+      showToast(`"${product.name}" saved`)
+      return row
+    } catch { showToast('Failed to save product', 'error'); return null }
+  }, [stamp])
+
+  const handleUpdateProduct = useCallback(async (id, product) => {
+    try {
+      const existing = savedProducts.find(p => p.id === id)
+      const before = existing?.data
+
+      product = { ...product, lastEditedBy: meRef.current?.id || null, lastEditedByName: meRef.current?.name || null }
+      try {
+        await writeProduct(id, product, { check: true })
+      } catch (e) {
+        if (!e?.conflict) throw e
+        // Someone else saved it first — show their version rather than overwrite it
+        const latest = e.latest
+        if (latest) {
+          versions.current.set('p' + id, latest.updated_at)
+          setSavedProducts(prev => prev.map(p => p.id === id ? latest : p))
+        }
+        const who = latest?.data?.lastEditedByName
+        showToast(`${who ? who : 'Someone'} changed "${existing?.name || 'this listing'}" while you were editing. Their version is loaded — check it, then save your change again.`, 'error')
+        return false
+      }
+      setSavedProducts((prev) => prev.map((p) =>
+        p.id === id ? { ...p, name: product.name, data: product } : p
+      ))
+
+      // Log a cost change if the effective cost actually moved
+      if (before) {
+        const costOf = (d) => {
+          const q = parseInt(d.bundleQty) || 1
+          return q > 1 ? (parseFloat(d.costPerItem) || 0) * q : (parseFloat(d.costPrice) || 0)
+        }
+        const oldCost = costOf(before)
+        const newCost = costOf(product)
+        if (Math.abs(oldCost - newCost) > 0.001) {
+          const rOld = calcProduct(before, settings.carriers, settings.packaging)
+          const rNew = calcProduct(product, settings.carriers, settings.packaging)
+          const entry = await logCostChange({
+            saved_product_id: id,
+            old_cost: oldCost,
+            new_cost: newCost,
+            old_margin: rOld.margin,
+            new_margin: rNew.margin,
+            sell_price: rNew.sellPrice,
+            supplier_name: product.supplierName || null,
+            is_bundle: (parseInt(product.bundleQty) || 1) > 1,
+            bundle_qty: parseInt(product.bundleQty) || 1,
+            note: null,
+            user_id: me?.id || null,
+            user_name: me?.name || null,
+          })
+          if (entry) setCostHistory(prev => [entry, ...prev])
+        }
+      }
+
+      log({ entity_type: 'listing', entity_id: id, entity_name: product.name, action: 'Edited', detail: before ? Object.keys(product).filter(k => !['lastEditedBy','lastEditedByName'].includes(k) && JSON.stringify(product[k]) !== JSON.stringify(before[k])).slice(0, 8).join(', ') : null })
+      showToast(`"${product.name}" updated`)
+    } catch { showToast('Failed to update product', 'error') }
+  }, [savedProducts, settings, me])
+
+  // Committing a new live price — this is the only thing that writes price history
+  const handleUpdateLivePrice = useCallback(async (savedProductId, updatedProduct, change) => {
+    try {
+      await writeProduct(savedProductId, updatedProduct)
+      setSavedProducts((prev) => prev.map((p) =>
+        p.id === savedProductId ? { ...p, data: updatedProduct } : p
+      ))
+
+      if (change) {
+        const entry = await logPriceChange({
+          saved_product_id: savedProductId,
+          old_price: change.oldPrice,
+          new_price: change.newPrice,
+          old_margin: change.oldMargin,
+          new_margin: change.newMargin,
+          old_profit: change.oldProfit,
+          new_profit: change.newProfit,
+          cost_price: change.costPrice,
+          source: 'live',
+          note: change.note || null,
+          user_id: me?.id || null,
+          user_name: me?.name || null,
+        })
+        if (entry) setPriceHistory(prev => [entry, ...prev])
+      }
+
+      log({ entity_type: 'listing', entity_id: savedProductId, entity_name: updatedProduct.name, action: 'Price changed', detail: `to £${parseFloat(updatedProduct.sellPrice).toFixed(2)}` })
+      showToast(`Live price set to £${parseFloat(updatedProduct.sellPrice).toFixed(2)}`)
+    } catch { showToast('Failed to update price', 'error') }
+  }, [me])
+
+  const handleRenameProduct = useCallback(async (id, newName) => {
+    try {
+      const row = savedProducts.find(p => p.id === id)
+      if (!row) return
+      await writeProduct(id, { ...row.data, name: newName })
+      setSavedProducts(prev => prev.map(p => p.id === id ? { ...p, name: newName, data: { ...p.data, name: newName } } : p))
+      log({ entity_type: 'listing', entity_id: id, entity_name: newName, action: 'Renamed' })
+      showToast('Product renamed')
+    } catch { showToast('Failed to rename', 'error') }
+  }, [savedProducts])
+
+  const handleDeleteProduct = useCallback(async (id) => {
+    try {
+      await deleteProduct(id)
+      setSavedProducts((prev) => prev.filter((p) => p.id !== id))
+      log({ entity_type: 'listing', entity_id: id, action: 'Deleted' })
+      showToast('Product deleted')
+    } catch { showToast('Failed to delete product', 'error') }
+  }, [])
+
+  const handleSaveMonth = useCallback(async (month) => {
+    try {
+      const row = await saveMonth(month)
+      setMonths((prev) => [row, ...prev])
+      showToast(`"${month.name}" created`)
+      return row
+    } catch { showToast('Failed to save month', 'error') }
+  }, [])
+
+  const handleUpdateMonth = useCallback(async (id, month) => {
+    setMonths((prev) => prev.map((m) => m.id === id ? { ...m, data: month, name: month.name } : m))
+    try { await updateMonth(id, month) }
+    catch { showToast('Failed to save month', 'error') }
+  }, [])
+
+  const handleRenameMonth = useCallback(async (id, newName) => {
+    try {
+      const row = months.find(m => m.id === id)
+      if (!row) return
+      const updated = { ...(row.data || row), name: newName }
+      await updateMonth(id, updated)
+      setMonths(prev => prev.map(m => m.id === id ? { ...m, name: newName, data: updated } : m))
+      showToast('Month renamed')
+    } catch { showToast('Failed to rename', 'error') }
+  }, [months])
+
+  const handleDeleteMonth = useCallback(async (id) => {
+    try {
+      await deleteMonth(id)
+      setMonths((prev) => prev.filter((m) => m.id !== id))
+      showToast('Month deleted')
+    } catch { showToast('Failed to delete month', 'error') }
+  }, [])
+
+  const handleLoadProduct = useCallback((row) => {
+    const data = { name: row.name, ...row.data }
+    // Older listings may be missing supplier details their products already hold
+    setCalc({ ...EMPTY_CALC, ...data, ...fillFromProducts(data, data.components, stockItems) })
+    setLoadedProductId(row.id)
+    setLoadedProductName(row.name)
+    setPage('calculator')
+  }, [stockItems])
+
+  // Start a new listing from a product (optionally as a multipack), already filled in
+  const handleCreateListing = useCallback((si, qty = 1) => {
+    setCalc({ ...EMPTY_CALC, serviceLevel: 'nextday', ...calcFromProduct(si, qty) })
+    setLoadedProductId(null)
+    setLoadedProductName('')
+    navigateTo('calculator')
+    showToast(`New listing for ${qty > 1 ? `${qty} × ` : ''}"${si.name}" — add a price and check the fee`)
+  }, [navigateTo])
+
+  // Live product handlers
+  const handlePushLive = useCallback(async (savedProductId, productName) => {
+    try {
+      // Check if already live
+      if (liveProducts.find(lp => lp.saved_product_id === savedProductId && lp.status !== 'removed')) {
+        showToast('This product is already live', 'error')
+        return
+      }
+      const row = await pushProductLive(savedProductId)
+      setLiveProducts(prev => [row, ...prev])
+      // Record who pushed it live on the listing itself
+      const saved = savedProducts.find(p => p.id === savedProductId)
+      if (saved) {
+        const s = stamp()
+        const updated = { ...(saved.data || {}), liveBy: s.userId, liveByName: s.userName, liveAt: s.at }
+        await writeProduct(savedProductId, updated)
+        setSavedProducts(prev => prev.map(p => p.id === savedProductId ? { ...p, data: updated } : p))
+      }
+      log({ entity_type: 'listing', entity_id: savedProductId, entity_name: productName, action: 'Went live' })
+      showToast(`"${productName}" is now live.`)
+    } catch { showToast('Failed to push live', 'error') }
+  }, [liveProducts, savedProducts, stamp])
+
+  const handleLiveStatusChange = useCallback(async (id, status) => {
+    try {
+      await updateLiveProductStatus(id, status)
+      setLiveProducts(prev => prev.map(lp => lp.id === id ? { ...lp, status } : lp))
+      showToast(status === 'live' ? 'Listing set to live' : 'Listing paused')
+    } catch { showToast('Failed to update status', 'error') }
+  }, [])
+
+  const handleRemoveLive = useCallback(async (id) => {
+    try {
+      await removeLiveProduct(id)
+      setLiveProducts(prev => prev.filter(lp => lp.id !== id))
+      log({ entity_type: 'listing', entity_id: liveProducts.find(l => l.id === id)?.saved_product_id || id, action: 'Removed from live' })
+      showToast('Removed from live listings')
+    } catch { showToast('Failed to remove', 'error') }
+  }, [])
+
+  // Review workflow
+  const handleSendReview = useCallback(async (id, name) => {
+    try {
+      const row = savedProducts.find(p => p.id === id)
+      if (!row) return
+      const s = stamp()
+      const updated = { ...(row.data || {}), reviewStatus: 'review',
+        submittedBy: s.userId, submittedByName: s.userName, submittedAt: s.at }
+      await writeProduct(id, updated)
+      setSavedProducts(prev => prev.map(p => p.id === id ? { ...p, data: updated } : p))
+      log({ entity_type: 'listing', entity_id: id, entity_name: name, action: 'Sent for review' })
+      showToast(`"${name}" sent to review`)
+    } catch { showToast('Failed to send to review', 'error') }
+  }, [savedProducts, stamp])
+
+  // editedData: the reviewer's changes, approved in the same step so they're never lost
+  const handleApproveReview = useCallback(async (id, name, editedData = null) => {
+    try {
+      const row = savedProducts.find(p => p.id === id)
+      if (!row) return false
+      const base = editedData || row.data || {}
+      if (!base.feeVerified && !window.confirm(
+        `The Amazon fee for "${name}" hasn't been verified yet.\n\nEverything about this listing's margin depends on it. Approve anyway?`)) return false
+      // Approving means we'll order it: any of its products without our SKU gets one now
+      if (seesCosts(me)) {
+        const ids = [...new Set((base.components || []).map(c => c.stockItemId).filter(Boolean))]
+        const missing = ids.map(sid => stockItems.find(si => si.id === sid)).filter(si => si && !(si.data?.sku || '').trim())
+        if (missing.length) {
+          const ok = await new Promise(resolve => setSkuAsk({ items: missing, listingName: name, resolve }))
+          if (!ok) return false
+          try { setStockItems(await loadStockItems()) } catch { /* shown on the next load */ }
+        }
+      }
+      const s = stamp()
+      const updated = { ...base, reviewStatus: 'approved', reviewNote: '',
+        reviewedBy: s.userId, reviewedByName: s.userName, reviewedAt: s.at }
+      if (editedData) {
+        const changed = Object.keys(editedData).filter(k => JSON.stringify(editedData[k]) !== JSON.stringify(row.data?.[k]))
+        if (changed.length) log({ entity_type: 'listing', entity_id: id, entity_name: name, action: 'Edited during review', detail: changed.join(', '),
+          before: Object.fromEntries(changed.map(k => [k, row.data?.[k] ?? null])), after: Object.fromEntries(changed.map(k => [k, editedData[k] ?? null])) })
+      }
+      await writeProduct(id, updated)
+      setSavedProducts(prev => prev.map(p => p.id === id ? { ...p, data: updated } : p))
+      // Approval is a buying decision, not a listing decision — stock still has
+      // to be ordered, so going live stays a separate, manual step.
+      log({ entity_type: 'listing', entity_id: id, entity_name: name, action: 'Approved' })
+      showToast(`"${name}" approved — ready to order`, 'success', { label: 'View', run: () => navigateTo('saved', id) })
+      return true
+    } catch { showToast('Failed to approve', 'error'); return false }
+  }, [savedProducts, stamp, navigateTo, stockItems, me])
+
+  const handleSendBackReview = useCallback(async (id, note) => {
+    try {
+      const row = savedProducts.find(p => p.id === id)
+      if (!row) return
+      const s = stamp()
+      const updated = { ...(row.data || {}), reviewStatus: 'none', reviewNote: note || '',
+        reviewedBy: s.userId, reviewedByName: s.userName, reviewedAt: s.at }
+      await writeProduct(id, updated)
+      setSavedProducts(prev => prev.map(p => p.id === id ? { ...p, data: updated } : p))
+      log({ entity_type: 'listing', entity_id: id, action: 'Sent back', detail: note || null })
+      showToast('Sent back to Saved Listings')
+    } catch { showToast('Failed to send back', 'error') }
+  }, [savedProducts])
+
+  // Bulk import
+  const handleBulkImport = useCallback(async (items, onProgress) => {
+    const newSaved = []
+    const newLive = []
+    let done = 0
+    let failed = 0
+
+    for (const { product, pushLive } of items) {
+      try {
+        const row = await saveProduct(product)
+        newSaved.push(row)
+        if (pushLive) {
+          const live = await pushProductLive(row.id)
+          newLive.push(live)
+        }
+      } catch { failed++ }
+      done++
+      onProgress?.(done, items.length)
+    }
+
+    setSavedProducts(prev => [...newSaved.reverse(), ...prev])
+    if (newLive.length) setLiveProducts(prev => [...newLive.reverse(), ...prev])
+
+    const liveMsg = newLive.length ? `, ${newLive.length} pushed live` : ''
+    const failMsg = failed ? `, ${failed} failed` : ''
+    showToast(`${newSaved.length} product${newSaved.length !== 1 ? 's' : ''} imported${liveMsg}${failMsg}`, failed ? 'error' : 'success')
+    if (newSaved.length) setPage('saved')
+  }, [])
+
+  // ── Products ──────────────────────────────────────────────────────────
+  const handleAddStockItem = useCallback(async (item) => {
+    try {
+      const s = stamp()
+      const row = await saveStockItem({ ...item, createdBy: s.userId, createdByName: s.userName, createdAt: s.at })
+      setStockItems(prev => [...prev, row].sort((a, b) => a.name.localeCompare(b.name)))
+      log({ entity_type: 'stock', entity_id: row?.id, entity_name: item.name, action: 'Created' })
+      showToast(`"${item.name}" added to products`)
+      return row
+    } catch { showToast('Failed to add product', 'error'); return null }
+  }, [stamp])
+
+  // Editing a product cascades to every listing that uses it
+  const handleUpdateStockItem = useCallback(async (id, item) => {
+    try {
+      const existing = stockItems.find(s => s.id === id)
+      const oldCost = parseFloat(existing?.data?.costPrice) || 0
+      const newCost = parseFloat(item.costPrice) || 0
+
+      try {
+        await writeStockItem(id, item, { check: true })
+      } catch (e) {
+        if (!e?.conflict) throw e
+        if (e.latest) {
+          versions.current.set('s' + id, e.latest.updated_at)
+          setStockItems(prev => prev.map(s => s.id === id ? e.latest : s))
+        }
+        showToast(`Someone else changed "${existing?.name}" while you were editing. Their version is loaded — check it, then save again.`, 'error')
+        return false
+      }
+      const nextStock = stockItems.map(s => s.id === id ? { ...s, name: item.name, data: item } : s)
+      setStockItems(nextStock)
+
+      // Log a cost change against each affected listing
+      if (Math.abs(oldCost - newCost) > 0.0001) {
+        const affected = savedProducts.filter(row =>
+          Array.isArray(row.data?.components) &&
+          row.data.components.some(c => c.stockItemId === id)
+        )
+        for (const row of affected) {
+          const rOld = calcProduct(row.data, settings.carriers, settings.packaging, stockItems)
+          const rNew = calcProduct(row.data, settings.carriers, settings.packaging, nextStock)
+          const entry = await logCostChange({
+            saved_product_id: row.id,
+            old_cost: rOld.costPrice,
+            new_cost: rNew.costPrice,
+            old_margin: rOld.margin,
+            new_margin: rNew.margin,
+            sell_price: rNew.sellPrice,
+            supplier_name: item.supplierName || null,
+            is_bundle: (row.data.components || []).reduce((s, c) => s + (parseInt(c.qty) || 0), 0) > 1,
+            bundle_qty: (row.data.components || []).reduce((s, c) => s + (parseInt(c.qty) || 0), 0),
+            note: `Product "${item.name}" cost changed`,
+            user_id: me?.id || null,
+            user_name: me?.name || null,
+          })
+          if (entry) setCostHistory(prev => [entry, ...prev])
+        }
+        showToast(`"${item.name}" updated — ${affected.length} listing${affected.length !== 1 ? 's' : ''} recalculated`)
+      } else {
+        log({ entity_type: 'stock', entity_id: id, entity_name: item.name, action: 'Edited' })
+        showToast(`"${item.name}" updated`)
+      }
+    } catch { showToast('Failed to update product', 'error') }
+  }, [stockItems, savedProducts, settings, me])
+
+  // A product any listing has ever used is archived, never deleted —
+  // deleting it would leave those listings with no cost or weight
+  const handleDeleteStockItem = useCallback(async (id) => {
+    try {
+      const users = savedProducts.filter(r => (r.data?.components || []).some(c => c.stockItemId === id))
+      if (users.length) {
+        const si = stockItems.find(s => s.id === id)
+        const data = { ...(si?.data || {}), archived: true, archivedAt: new Date().toISOString(), archivedBy: me?.name || null }
+        await writeStockItem(id, data)
+        setStockItems(prev => prev.map(s => s.id === id ? { ...s, data } : s))
+        showToast(`Archived rather than deleted — ${users.length} listing${users.length !== 1 ? 's' : ''} use${users.length === 1 ? 's' : ''} it`, 'success',
+          { label: 'Undo', run: async () => {
+            await writeStockItem(id, si.data)
+            setStockItems(prev => prev.map(s => s.id === id ? { ...s, data: si.data } : s))
+            showToast(`"${si.name}" restored`)
+          } })
+        return
+      }
+      await deleteStockItem(id)
+      setStockItems(prev => prev.filter(s => s.id !== id))
+      log({ entity_type: 'stock', entity_id: id, action: 'Deleted' })
+      showToast('Product deleted')
+    } catch (e) { showToast(e?.message ? `Couldn't delete — ${e.message}` : 'Failed to delete', 'error') }
+  }, [savedProducts, stockItems, me])
+
+  const handleRestoreStockItem = useCallback(async (id) => {
+    const si = stockItems.find(s => s.id === id)
+    if (!si) return
+    const data = { ...si.data, archived: false }
+    await writeStockItem(id, data)
+    setStockItems(prev => prev.map(s => s.id === id ? { ...s, data } : s))
+    log({ entity_type: 'stock', entity_id: id, entity_name: si.name, action: 'Restored' })
+    showToast(`"${si.name}" restored`)
+  }, [stockItems])
+
+  // One-time migration: create products and link every listing
+  // Listings → their Product. The latest listings, so an Undo straight after a link uses what was just saved
+  const savedRef = React.useRef(savedProducts)
+  useEffect(() => { savedRef.current = savedProducts }, [savedProducts])
+  const handleLinkListings = useCallback(async (rows, componentsFor) => {
+    const s = stamp()
+    const updates = []
+    for (const r of rows) {
+      const row = savedRef.current.find(x => x.id === r.id) || r
+      const updated = { ...(row.data || {}), components: componentsFor(row), productLinkedAt: s.at, productLinkedByName: s.userName }
+      await writeProduct(row.id, updated)
+      updates.push({ id: row.id, data: updated })
+      log({ entity_type: 'listing', entity_id: row.id, entity_name: row.name, action: 'Linked to product' })
+    }
+    setSavedProducts(prev => prev.map(r => updates.find(u => u.id === r.id) ? { ...r, data: updates.find(u => u.id === r.id).data } : r))
+  }, [stamp, writeProduct])
+  const handleUnlinkListings = useCallback(async (rows) => {
+    try {
+      const updates = []
+      for (const r of rows) {
+        const row = savedRef.current.find(x => x.id === r.id) || r
+        const { components, productLinkedAt, productLinkedByName, ...rest } = row.data || {}
+        await writeProduct(row.id, rest)
+        updates.push({ id: row.id, data: rest })
+      }
+      setSavedProducts(prev => prev.map(r => updates.find(u => u.id === r.id) ? { ...r, data: updates.find(u => u.id === r.id).data } : r))
+      showToast(`${updates.length} listing${updates.length !== 1 ? 's' : ''} unlinked — they use their own figures again`)
+    } catch { showToast('Couldn’t undo that — try again', 'error') }
+  }, [writeProduct])
+
+  const handleRunMigration = useCallback(async (plan) => {
+    try {
+      showToast('Creating products…')
+      const keyToId = new Map()
+      const created = []
+      for (const s of plan.stockItems) {
+        const { _key, ...clean } = s
+        const row = await saveStockItem(clean)
+        keyToId.set(_key, row.id)
+        created.push(row)
+      }
+      setStockItems(prev => [...prev, ...created].sort((a, b) => a.name.localeCompare(b.name)))
+
+      showToast('Linking listings…')
+      const updates = []
+      for (const link of plan.links) {
+        const row = savedProducts.find(r => r.id === link.productId)
+        if (!row) continue
+        const components = link.components
+          .map(c => ({ stockItemId: keyToId.get(c._key), qty: c.qty }))
+          .filter(c => c.stockItemId)
+        if (!components.length) continue
+        const updated = { ...row.data, components }
+        await writeProduct(row.id, updated)
+        updates.push({ id: row.id, data: updated })
+      }
+      setSavedProducts(prev => prev.map(r => {
+        const u = updates.find(x => x.id === r.id)
+        return u ? { ...r, data: u.data } : r
+      }))
+
+      showToast(`Linked ${updates.length} listings to ${created.length} products`)
+    } catch { showToast('Migration failed partway — check Products', 'error') }
+  }, [savedProducts])
+
+  // ── Archive ──────────────────────────────────────────────────────────────
+  const handleRunSweep = useCallback(async (sweep, opts) => {
+    try {
+      const targets = opts.keepReview
+        ? sweep.toArchive.filter(r => (r.data?.reviewStatus || 'none') !== 'review')
+        : sweep.toArchive
+
+      showToast(`Archiving ${targets.length} listings…`)
+      const stamp = new Date().toISOString()
+      const done = []
+      for (const row of targets) {
+        const updated = { ...(row.data || {}), archived: true, archivedAt: stamp }
+        await writeProduct(row.id, updated)
+        done.push({ id: row.id, data: updated })
+      }
+      setSavedProducts(prev => prev.map(r => {
+        const d = done.find(x => x.id === r.id)
+        return d ? { ...r, data: d.data } : r
+      }))
+
+      let removed = 0
+      if (opts.removeStock) {
+        for (const si of sweep.orphanStock) {
+          try { await deleteStockItem(si.id); removed++ } catch { /* keep going */ }
+        }
+        const gone = new Set(sweep.orphanStock.map(s => s.id))
+        setStockItems(prev => prev.filter(s => !gone.has(s.id)))
+      }
+
+      showToast(`Archived ${done.length} listings${removed ? `, removed ${removed} products` : ''}`)
+    } catch { showToast('Archive sweep failed partway — check the Archive page', 'error') }
+  }, [])
+
+  const handleRestoreArchived = useCallback(async (id, name) => {
+    try {
+      const row = savedProducts.find(r => r.id === id)
+      if (!row) return
+      const { archived, archivedAt, ...rest } = row.data || {}
+      await writeProduct(id, rest)
+      setSavedProducts(prev => prev.map(r => r.id === id ? { ...r, data: rest } : r))
+      log({ entity_type: 'listing', entity_id: id, entity_name: name, action: 'Restored from archive' })
+      showToast(`"${name}" restored`)
+    } catch { showToast('Failed to restore', 'error') }
+  }, [savedProducts])
+
+  const handleSaveProfile = useCallback(async (displayName, role) => {
+    if (!me?.id) return
+    const row = await upsertProfile(me.id, displayName, role)
+    if (row) {
+      setProfiles(prev => {
+        const others = prev.filter(p => p.id !== row.id)
+        return [...others, row]
+      })
+      showToast('Profile saved')
+    } else {
+      showToast('Failed to save profile', 'error')
+    }
+  }, [me])
+
+
+  // ── Suppliers, price lists and proposed changes ───────────────────────────
+  const handleUpdateSupplier = useCallback(async (id, data) => {
+    try {
+      await updateSupplier(id, data)
+      setSuppliers(prev => prev.map(s => s.id === id ? { ...s, data } : s))
+      log({ entity_type: 'supplier', entity_id: id, entity_name: suppliers.find(s => s.id === id)?.name, action: 'Terms changed', after: data })
+      showToast('Supplier terms saved')
+    } catch { showToast('Failed to save supplier', 'error') }
+  }, [])
+
+  const raiseProposals = useCallback(async (list) => {
+    if (!list.length) return 0
+    const added = await addProposedChanges(list)
+    if (added.length) setProposals(prev => [...added, ...prev])
+    return added.length
+  }, [])
+
+  // Shipping review finds cheaper carriers; switching them is proposed, not applied
+  const handleProposeCarrier = useCallback(async (items) => {
+    try {
+      const raised = await raiseProposals(carrierProposals(items, settings.carriers))
+      showToast(raised ? `${raised} switch${raised !== 1 ? 'es' : ''} proposed — approve them in Approvals` : 'Already proposed')
+    } catch { showToast('Could not propose the switch', 'error') }
+  }, [raiseProposals, settings])
+
+  const handleImportList = useCallback(async ({ supplier, rows, listDate, fileName }, onProgress) => {
+    try {
+      await saveSupplierProducts(supplier.id, rows, listDate, onProgress)
+      const [fresh, stats] = await Promise.all([loadCatalogueForStock(stockItems), loadCatalogueStats()])
+      setSupplierProducts(fresh)
+      setCatalogueStats(stats)
+
+      const list = [
+        ...listProposals({ supplier, rows, listDate, stockItems }),
+        ...cheaperSupplierProposals({ stockItems, supplierProducts: fresh, suppliers }),
+      ]
+      const raised = await raiseProposals(list)
+
+      const entry = await logPriceListImport({
+        supplier_id: supplier.id, file_name: fileName, list_date: listDate || null,
+        imported_by: me?.name || null,
+        summary: { products: rows.length, proposals: raised },
+      })
+      if (entry) setPriceImports(prev => [entry, ...prev])
+      log({ entity_type: 'supplier', entity_id: supplier.id, entity_name: supplier.name, action: 'Price list imported', detail: `${rows.length} products, ${raised} changes proposed`, source: fileName })
+      showToast(`${rows.length.toLocaleString()} products imported${raised ? ` — ${raised} change${raised !== 1 ? 's' : ''} proposed` : ''}`)
+    } catch (e) {
+      const why = e?.message ? ` (${e.message})` : ''
+      showToast(`Import failed — nothing on your products was changed${why}`, 'error')
+    }
+  }, [stockItems, suppliers, me, raiseProposals])
+
+  const handleScanForChanges = useCallback(async () => {
+    try {
+      const liveRows = liveProducts
+        .filter(lp => lp.status === 'live')
+        .map(lp => ({ saved: savedProducts.find(s => s.id === lp.saved_product_id) }))
+        .filter(x => x.saved && !x.saved.data?.archived)
+      const list = [
+        ...feeProposals(liveRows),
+        ...cheaperSupplierProposals({ stockItems, supplierProducts, suppliers }),
+      ]
+      const raised = await raiseProposals(list)
+      showToast(raised ? `${raised} new change${raised !== 1 ? 's' : ''} proposed` : 'Nothing new to propose')
+    } catch { showToast('Check failed', 'error') }
+  }, [liveProducts, savedProducts, stockItems, supplierProducts, suppliers, raiseProposals])
+
+  // Approving applies the change; rejecting just records the decision
+  const handleDecideProposals = useCallback(async (list, status) => {
+    const done = []
+    let nextSaved = savedProducts
+    let nextStock = stockItems
+    // Snapshot of everything an approval could touch, so it can be undone
+    const beforeSaved = new Map(savedProducts.map(r => [r.id, r]))
+    const beforeStock = new Map(stockItems.map(s => [s.id, s]))
+    try {
+      if (status === 'approved') {
+        for (const p of list) {
+          const pl = p.payload || {}
+          if (p.kind === 'carrier') {
+            const row = nextSaved.find(r => r.id === p.target_id)
+            if (!row) continue
+            const data = { ...row.data, carrierId: pl.toCarrierId, carrierCatId: pl.toCatId }
+            await writeProduct(row.id, data)
+            nextSaved = nextSaved.map(r => r.id === row.id ? { ...r, data } : r)
+          } else if (p.kind === 'referral_fee') {
+            const row = nextSaved.find(r => r.id === p.target_id)
+            if (!row) continue
+            const data = { ...row.data, refFee: String(pl.to) }
+            await writeProduct(row.id, data)
+            nextSaved = nextSaved.map(r => r.id === row.id ? { ...r, data } : r)
+          } else if (p.kind === 'barcode') {
+            const si = nextStock.find(s => s.id === p.target_id)
+            if (!si) continue
+            const data = { ...si.data, barcode: pl.to }
+            await writeStockItem(si.id, data)
+            nextStock = nextStock.map(s => s.id === si.id ? { ...s, data } : s)
+          } else if (p.kind === 'cost' || p.kind === 'cheaper_supplier') {
+            const si = nextStock.find(s => s.id === p.target_id)
+            if (!si) continue
+            const data = p.kind === 'cheaper_supplier'
+              ? { ...si.data, costPrice: String(pl.to), supplierName: pl.toSupplier, supplierSku: pl.toSku }
+              : { ...si.data, costPrice: String(pl.to) }
+            const before = nextStock
+            await writeStockItem(si.id, data)
+            nextStock = nextStock.map(s => s.id === si.id ? { ...s, data } : s)
+            // Record the cost change against every listing it affects
+            const affected = nextSaved.filter(r => (r.data?.components || []).some(c => c.stockItemId === si.id))
+            for (const row of affected) {
+              const rOld = calcProduct(row.data, settings.carriers, settings.packaging, before)
+              const rNew = calcProduct(row.data, settings.carriers, settings.packaging, nextStock)
+              const entry = await logCostChange({
+                saved_product_id: row.id, old_cost: rOld.costPrice, new_cost: rNew.costPrice,
+                old_margin: rOld.margin, new_margin: rNew.margin, sell_price: rNew.sellPrice,
+                supplier_name: data.supplierName || null,
+                note: p.kind === 'cheaper_supplier' ? `Switched to ${pl.toSupplier}` : (p.reason || 'Price list update'),
+                user_id: me?.id || null, user_name: me?.name || null,
+              })
+              if (entry) setCostHistory(prev => [entry, ...prev])
+            }
+          }
+          done.push(p.id)
+        }
+      } else {
+        done.push(...list.map(p => p.id))
+      }
+      await decideProposedChanges(done, status, me?.name || null)
+      setSavedProducts(nextSaved)
+      setStockItems(nextStock)
+      if (list.some(p => p.kind === 'barcode' || p.kind === 'cheaper_supplier')) {
+        loadCatalogueForStock(nextStock).then(setSupplierProducts).catch(() => {})
+      }
+      const now = new Date().toISOString()
+      setProposals(prev => prev.map(p => done.includes(p.id) ? { ...p, status, decided_by: me?.name || null, decided_at: now } : p))
+      list.filter(p => done.includes(p.id)).forEach(p => log({ entity_type: p.target_type === 'stock_item' ? 'stock' : 'listing', entity_id: p.target_id, entity_name: p.payload?.listing || p.payload?.stockItem, action: `${status === 'approved' ? 'Approved' : 'Rejected'} ${p.kind.replace('_', ' ')} change`, detail: p.reason, before: p.payload?.from !== undefined ? { value: p.payload.from } : null, after: p.payload?.to !== undefined ? { value: p.payload.to } : null, source: 'proposal' }))
+      const undo = status === 'approved' ? { label: 'Undo', run: async () => {
+        try {
+          const applied = list.filter(p => done.includes(p.id))
+          for (const p of applied) {
+            if (p.target_type === 'saved_product' && beforeSaved.has(p.target_id)) {
+              const was = beforeSaved.get(p.target_id)
+              await writeProduct(was.id, was.data)
+              setSavedProducts(prev => prev.map(r => r.id === was.id ? { ...r, data: was.data } : r))
+            }
+            if (p.target_type === 'stock_item' && beforeStock.has(p.target_id)) {
+              const was = beforeStock.get(p.target_id)
+              await writeStockItem(was.id, was.data)
+              setStockItems(prev => prev.map(s => s.id === was.id ? { ...s, data: was.data } : s))
+            }
+          }
+          await decideProposedChanges(done, 'pending', null)
+          setProposals(prev => prev.map(p => done.includes(p.id) ? { ...p, status: 'pending', decided_by: null, decided_at: null } : p))
+          applied.forEach(p => log({ entity_type: p.target_type === 'stock_item' ? 'stock' : 'listing', entity_id: p.target_id,
+            entity_name: p.payload?.listing || p.payload?.stockItem, action: `Undid ${p.kind.replace('_', ' ')} change`, source: 'undo' }))
+          showToast(`Undone — ${applied.length} change${applied.length !== 1 ? 's are' : ' is'} back in Approvals`)
+        } catch { showToast('Could not undo — nothing further was changed', 'error') }
+      } } : null
+      showToast(`${done.length} change${done.length !== 1 ? 's' : ''} ${status}`, 'success', undo)
+    } catch {
+      // Whatever succeeded before the failure has been applied — record those
+      if (done.length) {
+        await decideProposedChanges(done, status, me?.name || null).catch(() => {})
+        setSavedProducts(nextSaved); setStockItems(nextStock)
+        setProposals(prev => prev.map(p => done.includes(p.id) ? { ...p, status } : p))
+      }
+      showToast(`Stopped after ${done.length} — the rest are still waiting`, 'error')
+    }
+  }, [savedProducts, stockItems, settings, me])
+
+  // ── Hunts ─────────────────────────────────────────────────────────────────
+  const handleCreateHunts = useCallback(async (entries) => {
+    let first = null
+    try {
+      for (const e of entries) {
+        const now = new Date().toISOString()
+        await saveMarketListings(e.listings.map(l => ({ ...l, updated_at: now })))
+        const brands = [...new Set(e.listings.map(l => l.brand).filter(Boolean))]
+        const hunt = await createHunt(
+          { name: e.name.trim() || e.fileName, source_file: e.fileName, created_by: me?.name || null,
+            data: { heliumDate: heliumDateFromFile(e.fileName), brands } },
+          e.listings.map(l => ({ asin: l.asin, snapshot: { title: l.title, brand: l.brand, data: l.data } })))
+        setHunts(prev => [hunt, ...prev])
+        setMarketListings(prev => {
+          const map = new Map(prev.map(x => [x.asin, x]))
+          e.listings.forEach(l => map.set(l.asin, { ...l, updated_at: now }))
+          return [...map.values()]
+        })
+        if (!first) first = hunt
+      }
+      setHuntItems(await loadHuntItems())
+      showToast(entries.length > 1 ? `${entries.length} hunts created` : `"${first.name}" created`)
+      if (entries.length === 1 && first) navigateTo('hunter', first.id)
+    } catch (e) { showToast(`Could not create the hunt${e?.message ? ` (${e.message})` : ''}`, 'error') }
+  }, [me, navigateTo])
+
+  const handleUpdateHunt = useCallback(async (id, patch, { quiet } = {}) => {
+    setHunts(prev => prev.map(h => h.id === id ? { ...h, ...patch } : h))
+    try {
+      await updateHunt(id, patch)
+      if (!quiet && patch.status) showToast(patch.status === 'complete' ? 'Hunt marked as finished' : 'Hunt reopened')
+    } catch { if (!quiet) showToast('Could not save the hunt', 'error') }
+  }, [])
+
+  const handleSetDisposition = useCallback(async (ids, disposition, reason = null, note = null) => {
+    const patch = disposition === 'pending'
+      ? { disposition, reason: null, note: null, decided_by: null, decided_at: null }
+      : { disposition, reason, note, decided_by: me?.name || null, decided_at: new Date().toISOString() }
+    setHuntItems(prev => prev.map(i => ids.includes(i.id) ? { ...i, ...patch } : i))
+    try {
+      await updateHuntItems(ids, patch)
+      const byHunt = {}
+      huntItems.filter(i => ids.includes(i.id)).forEach(i => { byHunt[i.hunt_id] = (byHunt[i.hunt_id] || 0) + 1 })
+      Object.entries(byHunt).forEach(([hid, n]) => log({ entity_type: 'hunt', entity_id: hid, entity_name: hunts.find(h => h.id === hid)?.name,
+        action: disposition === 'pending' ? 'Moved back to decide' : disposition === 'skipped' ? 'Skipped' : disposition === 'later' ? 'Saved for later' : 'Updated',
+        detail: `${n} product${n !== 1 ? 's' : ''}${reason ? ` — ${reason}` : ''}${note ? `: ${note}` : ''}`, source: 'hunter' }))
+      if (ids.length > 1) showToast(`${ids.length} listings ${disposition === 'skipped' ? 'skipped' : 'updated'}`)
+    } catch {
+      showToast('Could not save that — refreshing', 'error')
+      setHuntItems(await loadHuntItems())
+    }
+  }, [me, huntItems, hunts])
+
+  // ── Online supplier sync ───────────────────────────────────────────────────
+  // Compare what the overnight sync found with your products, and raise
+  // anything that differs as a proposal. Already-raised and rejected ones are skipped.
+  const raiseOnlineProposals = useCallback(async (products, onlyName = null) => {
+    const online = suppliers.filter(s => s.data?.sync && (!onlyName || s.name === onlyName))
+    const list = []
+    for (const s of online) {
+      const rows = rowsFromCatalogue(products, s.id)
+      if (!rows.length) continue
+      list.push(...listProposals({ supplier: s, rows, listDate: new Date().toISOString().slice(0, 10), stockItems }))
+    }
+    list.push(...cheaperSupplierProposals({ stockItems, supplierProducts: products, suppliers }))
+    return raiseProposals(list)
+  }, [suppliers, stockItems, raiseProposals])
+
+  const handleSyncNow = useCallback(async (supplierName) => {
+    try {
+      const res = await triggerSupplierSync(supplierName)
+      const r = res?.results?.[0] || {}
+      const [fresh, ss, stats] = await Promise.all([loadCatalogueForStock(stockItems), loadSyncStatus(), loadCatalogueStats()])
+      setSupplierProducts(fresh)
+      setSyncStatus(ss)
+      setCatalogueStats(stats)
+      const raised = await raiseOnlineProposals(fresh, supplierName)
+      if (r.error) showToast(`${supplierName}: ${r.error}`, 'error')
+      else if (r.skipped) showToast(`${supplierName} is ${r.skipped}`)
+      else showToast(r.done
+        ? `${supplierName} synced${raised ? ` — ${raised} change${raised !== 1 ? 's' : ''} proposed` : ''}`
+        : `${supplierName}: read to page ${r.pos} — the overnight run will finish the rest`)
+    } catch (e) { showToast(`Sync failed${e?.message ? ` (${e.message})` : ''}`, 'error') }
+  }, [raiseOnlineProposals, stockItems])
+
+  // ── Product hunter ────────────────────────────────────────────────────────
+  const handleImportHelium = useCallback(async (text, fileName) => {
+    const { listings, error } = parseHeliumExport(text, fileName)
+    if (error) { showToast(error, 'error'); return }
+    if (!listings.length) { showToast(`No listings found in ${fileName}`, 'error'); return }
+    try {
+      const now = new Date().toISOString()
+      const rows = listings.map(l => ({ ...l, updated_at: now }))
+      await saveMarketListings(rows)
+      setMarketListings(prev => {
+        const map = new Map(prev.map(x => [x.asin, x]))
+        rows.forEach(r => map.set(r.asin, r))
+        return [...map.values()]
+      })
+      showToast(`${listings.length.toLocaleString()} listings imported from ${fileName}`)
+    } catch (e) { showToast(`Import failed${e?.message ? ` (${e.message})` : ''}`, 'error') }
+  }, [])
+
+  const handleDecideMatch = useCallback(async (asin, status, components) => {
+    try {
+      if (status === 'clear') {
+        await deleteAsinMatch(asin)
+        setAsinMatches(prev => prev.filter(m => m.asin !== asin))
+        return
+      }
+      const row = await saveAsinMatch({ asin, status, components, decided_by: me?.name || null, decided_at: new Date().toISOString() })
+      setAsinMatches(prev => [...prev.filter(m => m.asin !== asin), row])
+      showToast(status === 'confirmed' ? 'Match confirmed — remembered for next time' : 'Marked as not a match')
+    } catch { showToast('Could not save that decision', 'error') }
+  }, [me])
+
+  const titleCase = (s) => String(s || '').toLowerCase().replace(/\b([a-z])/g, (m) => m.toUpperCase()).replace(/\b(\d+)(Ml|G|Kg|L)\b/g, (m, n, u) => n + u.toLowerCase())
+
+  // Creates the product if needed and a listing in the Review Queue
+  const handleSendToReview = useCallback(async ({ l, m, ev }, overrides = {}, ctx = {}) => {
+    try {
+      const s = stamp()
+      const components = []
+      let nextStock = stockItems
+      // Use what was checked and adjusted in the panel, where given
+      const comps = overrides.offer
+        ? [{ sp: overrides.offer, qty: overrides.qty || m.components[0]?.qty || 1 }]
+        : m.components
+      for (const c of comps) {
+        let si = nextStock.find(x => x.data?.barcode && x.data.barcode === c.sp.barcode)
+        if (!si) {
+          const supplier = suppliers.find(x => x.id === c.sp.supplier_id)
+          const w = parseFloat(overrides.product?.weightKg) || ev.weightKg
+          const n = overrides.qty || ev.units
+          const unitWeight = w && n ? +(w / n).toFixed(3) : ''
+          si = await saveStockItem({
+            name: titleCase(c.sp.name), brand: l.brand || '',
+            supplierName: supplier?.name || '', supplierSku: c.sp.supplier_sku,
+            barcode: c.sp.barcode || '', costPrice: String(c.sp.unit_cost),
+            weightKg: String(unitWeight), notes: 'Added by the product hunter',
+            createdBy: s.userId, createdByName: s.userName, createdAt: s.at,
+          })
+          nextStock = [...nextStock, si]
+        }
+        components.push({ stockItemId: si.id, qty: c.qty })
+      }
+      const units = components.reduce((n, c) => n + (parseInt(c.qty) || 0), 0)
+      const product = {
+        ...ev.product,
+        ...(overrides.product || {}),
+        name: l.title.slice(0, 160), brand: l.brand || '', asin: l.asin,
+        ...fillFromProducts({ brand: l.brand || '', name: l.title }, components, nextStock),
+        components, bundleQty: String(units || 1), costPrice: '', useComponents: true,
+        // Only carry a fee category across if it's genuinely known; otherwise
+        // leave it for you to set and verify in the calculator
+        feeCategory: overrides.product ? (overrides.product.feeCategory || '') : (ev.feeSource === 'confirmed' ? ev.feeCategory : ''),
+        refFee: overrides.product ? (overrides.product.refFee || '15.3') : (ev.feeSource === 'your listing' ? ev.product.refFee : '15.3'),
+        reviewStatus: 'review', submittedBy: s.userId, submittedByName: s.userName, submittedAt: s.at,
+        createdBy: s.userId, createdByName: s.userName, createdAt: s.at,
+        feeVerified: !!overrides.product?.feeVerified,
+        hunter: {
+          matchedBy: m.tier, sales: l.data.sales, sellers: l.data.sellers,
+          amazonSelling: l.data.amazonSelling, marketPrice: l.data.price, at: s.at,
+          feeSource: ev.feeSource, guessedCategory: ev.guessedCategory,
+          packagingReason: ev.pack?.reason || null,
+          huntId: ctx.hunt?.id || null, huntName: ctx.hunt?.name || null,
+        },
+      }
+      const row = await saveProduct(product)
+      setStockItems(nextStock.sort((a, b) => a.name.localeCompare(b.name)))
+      setSavedProducts(prev => [row, ...prev])
+      if (ctx.item?.id) {
+        const patch = { disposition: 'sent', saved_product_id: row.id, decided_by: s.userName, decided_at: s.at, reason: null, note: null }
+        await updateHuntItems([ctx.item.id], patch)
+        setHuntItems(prev => prev.map(i => i.id === ctx.item.id ? { ...i, ...patch } : i))
+      }
+      // The listing's history records exactly where it came from
+      const origin = comps[0]?.sp
+      const supplierName = suppliers.find(x => x.id === origin?.supplier_id)?.name || null
+      const provenance = {
+        huntId: ctx.hunt?.id || null, huntName: ctx.hunt?.name || null, asin: l.asin,
+        matchedBy: m.tier, supplier: supplierName, supplierSku: origin?.supplier_sku || null,
+        units: comps.reduce((n, c) => n + (c.qty || 0), 0), marketPrice: l.data?.price ?? null,
+        feeVerified: !!overrides.product?.feeVerified,
+      }
+      log({ entity_type: 'listing', entity_id: row.id, entity_name: l.title.slice(0, 120), action: 'Created from product hunter',
+        detail: `From hunt "${ctx.hunt?.name || 'unknown'}" · ASIN ${l.asin} · matched by ${m.tier}${supplierName ? ` · ${supplierName}${origin?.supplier_sku ? ` ${origin.supplier_sku}` : ''}` : ''}`,
+        after: provenance, source: 'hunter' })
+      if (ctx.hunt) log({ entity_type: 'hunt', entity_id: ctx.hunt.id, entity_name: ctx.hunt.name, action: 'Sent to review',
+        detail: l.title.slice(0, 120), after: { ...provenance, listingId: row.id }, source: 'hunter' })
+      showToast(`"${l.title.slice(0, 40)}…" sent for review`, 'success',
+        { label: 'View', run: () => navigateTo('saved', row.id) })
+      return true
+    } catch (e) { showToast(`Could not create the listing${e?.message ? ` (${e.message})` : ''}`, 'error'); return false }
+  }, [stockItems, suppliers, stamp, navigateTo])
+
+  const onlineChecked = React.useRef(false)
+  useEffect(() => {
+    if (onlineChecked.current || loading || !suppliers.length || !supplierProducts.length || !stockItems.length) return
+    onlineChecked.current = true
+    raiseOnlineProposals(supplierProducts).catch(() => {})
+  }, [loading, suppliers, supplierProducts, stockItems, raiseOnlineProposals])
+
+  // ── People and access (admin only; the server checks too) ──────────────────
+  const refreshProfiles = useCallback(async () => { setProfiles(await loadProfiles()) }, [])
+
+  const handleCreateUser = useCallback(async (form) => {
+    const res = await adminUsers({ action: 'create', ...form })
+    await refreshProfiles()
+    log({ entity_type: 'person', entity_id: res?.profile?.id, entity_name: form.displayName || form.email,
+      action: 'Account created', detail: `${form.role} · ${(form.permissions || []).length} sections` })
+    showToast(`Account created for ${form.displayName || form.email}`)
+    return res
+  }, [refreshProfiles])
+
+  const handleUpdateUser = useCallback(async (id, patch) => {
+    const before = profiles.find(p => p.id === id)
+    const res = await adminUsers({ action: 'update', id, ...patch })
+    await refreshProfiles()
+    const what = patch.active !== undefined ? (patch.active ? 'Access turned back on' : 'Access turned off') : 'Access changed'
+    log({ entity_type: 'person', entity_id: id, entity_name: before?.display_name || before?.email, action: what,
+      detail: patch.permissions ? `${patch.role || before?.role} · ${patch.permissions.length} sections` : null,
+      before: before ? { role: before.role, permissions: before.permissions, active: before.active } : null,
+      after: res?.profile ? { role: res.profile.role, permissions: res.profile.permissions, active: res.profile.active } : null })
+    showToast(what)
+    return res
+  }, [profiles, refreshProfiles])
+
+  const handleSetUserPassword = useCallback(async (id, password) => {
+    await adminUsers({ action: 'password', id, password })
+    const who = profiles.find(p => p.id === id)
+    log({ entity_type: 'person', entity_id: id, entity_name: who?.display_name || who?.email, action: 'Password set by admin' })
+    showToast('Password set — pass it on yourself, no email was sent')
+  }, [profiles])
+
+  /** A company you pay — tagged with what kind of spending it's for. */
+  const handleCreatePayee = useCallback(async (payee, kind) => {
+    try {
+      const existing = suppliers.find(s => s.name.trim().toLowerCase() === payee.name.trim().toLowerCase())
+      if (existing) {
+        // Already known for something else — just add this kind to them
+        const kinds = [...new Set([...(existing.data?.kinds || ['stock']), kind])]
+        const data = { ...existing.data, kinds }
+        await updateSupplier(existing.id, data)
+        setSuppliers(prev => prev.map(s => s.id === existing.id ? { ...s, data } : s))
+        showToast(`${existing.name} can now be used for ${kind} orders`)
+        return { ...existing, data }
+      }
+      const data = {
+        kinds: [kind], source: 'manual', moq: 0, delivery: 0,
+        leadDays: 0, website: payee.website?.trim() || '', accountRef: payee.accountRef?.trim() || '',
+        creditDays: parseInt(payee.creditDays) || 0, notes: payee.notes || '',
+      }
+      const row = await createSupplier(payee.name.trim(), data)
+      setSuppliers(prev => [...prev, row].sort((a, b) => a.name.localeCompare(b.name)))
+      log({ entity_type: 'supplier', entity_id: row.id, entity_name: row.name, action: 'Added', detail: kind })
+      showToast(`${row.name} added`)
+      return row
+    } catch (e) { showToast('Could not add them', 'error'); return null }
+  }, [suppliers])
+
+  /**
+   * Start an order from the supplier's own document: read it, attach it, and
+   * fill in what it says. Everything is still shown for checking before sending.
+   */
+  const handleNewFromDocument = useCallback(async (file) => {
+    if (!canReadFile(file)) { showToast('Only PDFs can be read — start the order by hand', 'error'); return }
+    try {
+      showToast('Reading the document…')
+      const parsed = parseInvoice(await pdfToText(file))
+      const po_number = await nextPoNumber()
+      const kind = parsed.documentKind === 'invoice' || parsed.documentKind === 'receipt' ? 'invoice' : 'proforma'
+      const path = await uploadPurchaseDoc(file, po_number, kind)
+      const supplier = parsed.supplierName ? supplierForName(parsed.supplierName, suppliers) : null
+      const lines = (parsed.lines || []).map(l => {
+        const si = stockItems.find(s => !s.data?.archived && (
+          (l.barcode && s.data?.barcode === l.barcode) ||
+          (l.sku && String(s.data?.supplierSku || '').toLowerCase() === String(l.sku).toLowerCase())))
+        return {
+          stock_item_id: si?.id || null, name: si?.name || l.name, supplier_sku: l.sku || '',
+          qty: l.qty, unit_cost: l.unitCost, qty_received: 0,
+          data: { systemCost: si ? parseFloat(si.data?.costPrice) || null : null, fromDocument: true },
+        }
+      })
+      setPoDraft({
+        po_number, kind: 'order', status: 'draft', payment_status: 'unpaid',
+        category: supplier && (supplier.data?.kinds || []).includes('packaging') ? 'packaging' : 'stock',
+        supplier_id: supplier?.id || '', supplier_name: supplier?.name || parsed.supplierName || '',
+        terms: 'prepay', order_method: kind === 'invoice' ? 'invoice' : 'proforma',
+        [kind === 'invoice' ? 'invoice_path' : 'proforma_path']: path,
+        invoice_number: parsed.invoiceNumber || null, invoice_total: parsed.total ?? null,
+        delivery: parsed.delivery ?? 0, created_by: meRef.current?.name || null,
+        data: { vatApplies: (parsed.vat ?? 0) > 0, vatRate: 20, readFromDocument: { at: new Date().toISOString(), warnings: parsed.warnings } },
+        items: lines,
+      })
+      navigateTo('purchases')
+      showToast(lines.length
+        ? `Read ${lines.length} line${lines.length !== 1 ? 's' : ''} from ${parsed.supplierName || 'the document'} — check it before sending`
+        : 'Read the totals — add the lines yourself if you need them')
+    } catch (e) {
+      showToast('Could not read that document — start the order by hand', 'error')
+    }
+  }, [suppliers, stockItems, navigateTo])
+
+  /** Money coming back from a supplier — against an order, or on its own. */
+  const handleRaiseCredit = useCallback(async (po = null) => {
+    try {
+      const po_number = await nextCreditNumber()
+      setPoDraft({
+        po_number, kind: 'credit_note', status: 'draft', payment_status: 'unpaid',
+        category: po?.category || 'stock', supplier_id: po?.supplier_id || '', supplier_name: po?.supplier_name || '',
+        terms: 'prepay', order_method: 'proforma', credit_for: po?.id || null, credit_reason: 'refund',
+        created_by: meRef.current?.name || null,
+        data: { creditForNumber: po?.po_number || null, vatApplies: po?.data?.vatApplies !== false, vatRate: po?.data?.vatRate ?? 20 },
+        items: [],
+      })
+      setOpenPo(null)
+      navigateTo('purchases')
+    } catch { showToast('Could not start a credit note', 'error') }
+  }, [navigateTo])
+
+  /** Raise the next one of a repeating bill, with the same lines. */
+  const handleRepeatPo = useCallback(async (po) => {
+    try {
+      const po_number = await nextPoNumber()
+      const next = nextRepeat(po.payment_due_at || po.created_at, po.data?.repeat)
+      setPoDraft({
+        ...po, id: undefined, po_number, status: 'draft', payment_status: 'unpaid',
+        proforma_path: null, invoice_path: null, invoice_number: null, invoice_total: null,
+        paid_at: null, paid_by: null, payment_method: null, payment_reference: null,
+        sent_at: null, sent_by: null, received_at: null, completed_at: null, completed_by: null,
+        payment_due_at: next ? next.toISOString().slice(0, 10) : null,
+        created_by: meRef.current?.name || null, created_at: null,
+        data: { ...(po.data || {}), repeatedFrom: po.po_number },
+        items: (po.items || []).map(i => {
+          const { requestIds: _r, ...data } = i.data || {}
+          return { ...i, id: undefined, qty_received: 0, line_status: 'due', back_order_date: null, data }
+        }),
+      })
+      setOpenPo(null)
+      navigateTo('purchases')
+      showToast(`${po_number} started from ${po.po_number}`)
+    } catch { showToast('Could not repeat that order', 'error') }
+  }, [navigateTo])
+
+  /** Change the packaging on many listings at once. */
+  const handleBulkPackaging = useCallback(async (ids, packagingId) => {
+    const to = (settings?.packaging || []).find(p => p.id === packagingId)
+    let done = 0
+    const failed = []
+    for (const id of ids) {
+      const row = savedProducts.find(r => r.id === id)
+      if (!row) continue
+      try {
+        await handleUpdateProduct(id, { ...row.data, packagingId })
+        done++
+      } catch (e) { failed.push(row.name) }
+    }
+    log({ entity_type: 'listing', action: 'Packaging changed in bulk',
+      detail: `${done} listing${done !== 1 ? 's' : ''} moved to ${to?.name || 'no packaging'}`,
+      source: 'packaging' })
+    showToast(failed.length
+      ? `${done} changed, ${failed.length} could not be — someone else may be editing them`
+      : `${done} listing${done !== 1 ? 's' : ''} now use ${to?.name || 'no packaging'}`,
+      failed.length ? 'error' : 'success')
+  }, [savedProducts, settings, handleUpdateProduct])
+
+  // ── Purchasing ─────────────────────────────────────────────────────────────
+  const refreshPurchases = useCallback(async () => {
+    const { orders, issues } = await loadPurchaseOrders()
+    setPurchaseOrders(orders)
+    setPurchaseIssues(issues)
+    return orders
+  }, [])
+
+  /** Start an order, optionally with products already on it. */
+  const handleNewPo = useCallback(async (products = []) => {
+    try {
+      const po_number = await nextPoNumber()
+      const supplierName = products.length ? products[0].si.data?.supplierName : ''
+      const supplier = supplierName ? supplierForName(supplierName, suppliers) : null
+      setPoDraft({
+        po_number, status: 'draft', payment_status: 'unpaid', terms: 'prepay',
+        supplier_id: supplier?.id || '', supplier_name: supplier?.name || '',
+        created_by: meRef.current?.name || null,
+        items: products.map(({ si, qty }) => ({
+          stock_item_id: si.id, name: si.name, supplier_sku: si.data?.supplierSku || '',
+          qty: qty || 1, unit_cost: poUnitCost(si), qty_received: 0, line_note: packUnitsOf(si) > 1 ? `Pack of ${packUnitsOf(si)}` : null,
+          data: { systemCost: poUnitCost(si), ...(packUnitsOf(si) > 1 ? { packUnits: packUnitsOf(si) } : {}) },
+        })),
+      })
+      navigateTo('purchases')
+    } catch (e) { showToast('Could not start a purchase order', 'error') }
+  }, [suppliers, navigateTo])
+
+  /** Order stock for products — from a product, or from a listing's components. */
+  const handleOrderStock = useCallback((products) => {
+    const list = (products || []).filter(x => x.si)
+    if (!list.length) return
+    const suppliersUsed = [...new Set(list.map(x => x.si.data?.supplierName).filter(Boolean))]
+    if (suppliersUsed.length > 1) {
+      showToast(`These come from ${suppliersUsed.length} suppliers — raise one order per supplier`, 'error')
+    }
+    handleNewPo(list)
+  }, [handleNewPo])
+
+  /**
+   * Requests ride on PO lines (each line remembers which requests it's for).
+   * After every save, point those requests at the saved lines — and free any
+   * that were taken off the order.
+   */
+  const syncRequestLinks = useCallback(async (saved) => {
+    const want = new Map()
+    for (const i of saved.items || []) for (const rid of i.data?.requestIds || []) want.set(rid, i)
+    const current = await requestsOnPo(saved.id)
+    if (!want.size && !current.length) return
+    const by = meRef.current?.name || null
+    for (const [rid, item] of want) {
+      const was = current.find(c => c.id === rid)
+      await updateStockRequest(rid, { po_id: saved.id, po_item_id: item.id, status: 'ordered' })
+      if (!was) await addRequestEvent(rid, by, `Added to ${saved.po_number}`, `${parseFloat(item.qty) || 0} on the order from ${saved.supplier_name || 'the supplier'}`)
+    }
+    for (const c of current) if (!want.has(c.id)) {
+      await updateStockRequest(c.id, { po_id: null, po_item_id: null, status: 'acknowledged' })
+      await addRequestEvent(c.id, by, `Taken off ${saved.po_number}`, null)
+    }
+    refreshRequests()
+  }, [refreshRequests])
+
+  const handleRaiseRequest = useCallback(async (form) => {
+    const photo_path = form.photo ? await uploadRequestPhoto(form.photo) : null
+    const qty = parseFloat(form.qty_requested) || null
+    const row = await createStockRequest({
+      stock_item_id: form.stock_item_id || null, product_name: form.product_name,
+      barcode: form.barcode?.trim() || null, helm_sku: form.helm_sku?.trim() || null, photo_path,
+      qty_requested: qty, urgency: form.urgency, note: form.note?.trim() || null, raised_by: form.raised_by || meRef.current?.name || null,
+    })
+    await addRequestEvent(row.id, row.raised_by, 'Asked for',
+      [qty ? `${qty} wanted` : null, URGENCY[form.urgency]?.label, form.note?.trim()].filter(Boolean).join(' · '))
+    log({ entity_type: 'request', entity_id: row.id, entity_name: row.ref, action: 'Stock requested',
+      detail: `${row.product_name}${row.raised_by ? ` · by ${row.raised_by}` : ''}`, source: 'requests' })
+    await refreshRequests()
+    showToast(`${row.ref} sent to the office`)
+    return row
+  }, [refreshRequests])
+
+  /** A change to a request, with a line on its history. */
+  const handleUpdateRequest = useCallback(async (r, patch, action, detail, who) => {
+    try {
+      if (patch) await updateStockRequest(r.id, patch)
+      await addRequestEvent(r.id, who || meRef.current?.name || null, action, detail)
+      await refreshRequests()
+      if (patch?.status === 'cancelled') showToast(`${r.ref} cancelled`)
+    } catch { showToast('Could not save that — try again', 'error') }
+  }, [refreshRequests])
+
+  const handleAcknowledgeRequests = useCallback(async (list) => {
+    const s = stamp()
+    for (const r of list) {
+      await updateStockRequest(r.id, { status: 'acknowledged', acknowledged_at: s.at, acknowledged_by: s.userName })
+      await addRequestEvent(r.id, s.userName, 'Seen by the office', null)
+    }
+    await refreshRequests()
+    showToast(list.length === 1 ? `${list[0].ref} marked as seen` : `${list.length} requests marked as seen`)
+  }, [refreshRequests, stamp])
+
+  const handleDeclineRequest = useCallback(async (r, reason) => {
+    const s = stamp()
+    await updateStockRequest(r.id, { status: 'declined', status_reason: reason })
+    await addRequestEvent(r.id, s.userName, 'Not being ordered', reason)
+    log({ entity_type: 'request', entity_id: r.id, entity_name: r.ref, action: 'Request declined', detail: reason, source: 'requests' })
+    await refreshRequests()
+    showToast(`${r.ref} — the warehouse will see why`)
+  }, [refreshRequests, stamp])
+
+  /** Start a purchase order with the requested products on it. */
+  const handleRaisePoFromRequests = useCallback(async (list) => {
+    try {
+      const po_number = await nextPoNumber()
+      const withProduct = list.map(r => ({ r, si: r.stock_item_id ? stockItems.find(x => x.id === r.stock_item_id) : null }))
+      const supplierName = withProduct.find(x => x.si?.data?.supplierName)?.si.data.supplierName || ''
+      const supplier = supplierName ? supplierForName(supplierName, suppliers) : null
+      setPoDraft({
+        po_number, status: 'draft', payment_status: 'unpaid', terms: 'prepay',
+        category: supplier && (supplier.data?.kinds || []).includes('packaging') && !(supplier.data?.kinds || []).includes('stock') ? 'packaging' : 'stock',
+        supplier_id: supplier?.id || '', supplier_name: supplier?.name || '',
+        created_by: meRef.current?.name || null,
+        data: { fromRequests: list.map(r => r.ref) },
+        items: withProduct.map(({ r, si }) => {
+          // Requests are in units; something bought in packs is ordered in packs (rounded up)
+          const units = parseFloat(r.qty_requested) || 1
+          const qty = si ? packsFor(si, units) : units
+          const cost = si ? poUnitCost(si) : 0
+          return si
+            ? { stock_item_id: si.id, name: si.name, supplier_sku: si.data?.supplierSku || '', qty, unit_cost: cost, qty_received: 0,
+                line_note: packUnitsOf(si) > 1 ? `Pack of ${packUnitsOf(si)} · ${units} wanted` : null,
+                data: { systemCost: cost, requestIds: [r.id], ...(packUnitsOf(si) > 1 ? { packUnits: packUnitsOf(si) } : {}) } }
+            : { stock_item_id: null, name: r.product_name, supplier_sku: '', qty, unit_cost: 0, qty_received: 0, data: { requestIds: [r.id] } }
+        }),
+      })
+      navigateTo('purchases')
+      showToast(`${po_number} started from ${list.map(r => r.ref).join(', ')} — they’re linked when you save it`)
+    } catch { showToast('Could not start a purchase order', 'error') }
+  }, [stockItems, suppliers, navigateTo])
+
+  /** It's already been ordered: point the request at that order line. */
+  const handleLinkRequestToOrder = useCallback(async (r, po, item) => {
+    const ids = [...new Set([...(item.data?.requestIds || []), r.id])]
+    await updatePoItem(item.id, { data: { ...(item.data || {}), requestIds: ids } })
+    await updateStockRequest(r.id, { po_id: po.id, po_item_id: item.id, status: 'ordered' })
+    await addRequestEvent(r.id, meRef.current?.name || null, `Linked to ${po.po_number}`, `${parseFloat(item.qty) || 0} on the order from ${po.supplier_name || 'the supplier'}`)
+    await Promise.all([refreshRequests(), refreshPurchases()])
+    showToast(`${r.ref} linked to ${po.po_number}`)
+  }, [refreshRequests, refreshPurchases])
+
+  const handleUnlinkRequest = useCallback(async (r) => {
+    const po = purchaseOrders.find(o => o.id === r.po_id)
+    const item = po?.items?.find(i => i.id === r.po_item_id)
+    if (item) await updatePoItem(item.id, { data: { ...(item.data || {}), requestIds: (item.data?.requestIds || []).filter(x => x !== r.id) } })
+    await updateStockRequest(r.id, { po_id: null, po_item_id: null, status: 'acknowledged' })
+    await addRequestEvent(r.id, meRef.current?.name || null, `Taken off ${r.progress?.po_number || 'the order'}`, null)
+    await Promise.all([refreshRequests(), refreshPurchases()])
+    showToast(`${r.ref} is waiting to be ordered again`)
+  }, [purchaseOrders, refreshRequests, refreshPurchases])
+
+  const handleLinkRequestProduct = useCallback(async (r, si) => {
+    await updateStockRequest(r.id, { stock_item_id: si.id, product_name: si.name, data: { ...(r.data || {}), askedAs: r.product_name } })
+    await addRequestEvent(r.id, meRef.current?.name || null, 'Matched to a product', `“${r.product_name}” → ${si.name}`)
+    await refreshRequests()
+    showToast(`${r.ref} linked to ${si.name}`)
+  }, [refreshRequests])
+
+  /** A delivery booked in at goods in. */
+  const handleBookIn = useCallback(async (order, lines, delivery) => {
+    const r = await bookInDelivery(order.id, lines, delivery)
+    await Promise.all([refreshGoodsIn(), refreshRequests(), canAccess(meRef.current, 'purchases') ? refreshPurchases() : null])
+    const units = lines.reduce((t, l) => t + (parseFloat(l.arrived) || 0), 0)
+    showToast(r?.problems ? `${r.ref} booked in — problems sent to the office` : `${r?.ref || 'Delivery'} booked in · ${units} units`)
+    return r
+  }, [refreshGoodsIn, refreshRequests, refreshPurchases])
+
+  const handleUnexpectedDelivery = useCallback(async (row) => {
+    const d = await logUnexpectedDelivery(row)
+    log({ entity_type: 'delivery', entity_id: d.id, entity_name: d.ref, action: 'Arrived with no order',
+      detail: [row.supplier_name, row.received_by && `by ${row.received_by}`].filter(Boolean).join(' · '), source: 'goods-in' })
+    await refreshGoodsIn()
+    showToast(`${d.ref} logged — the office will sort it`)
+    return d
+  }, [refreshGoodsIn])
+
+  const handleUpdateDelivery = useCallback(async (d, patch, action) => {
+    try {
+      await updateDelivery(d.id, patch)
+      log({ entity_type: 'delivery', entity_id: d.id, entity_name: d.ref, action: `Delivery: ${action}`, detail: patch.office_note || null, source: 'goods-in' })
+      await refreshGoodsIn()
+      showToast(action === 'Put away' ? `${d.ref} put away` : `${d.ref}: ${action.toLowerCase()}`)
+    } catch { showToast('Could not save that — try again', 'error') }
+  }, [refreshGoodsIn])
+
+  const handleGoodsInPhoto = useCallback(async (file, kind) => {
+    try { return await uploadGoodsInPhoto(file, kind) } catch { showToast('That photo didn’t upload — try again', 'error'); return null }
+  }, [])
+
+  const handleViewGoodsInPhoto = useCallback(async (path) => {
+    const url = await goodsInPhotoUrl(path)
+    if (url) window.open(url, '_blank', 'noopener')
+    else showToast('Could not open that photo', 'error')
+  }, [])
+
+  const handleViewRequestPhoto = useCallback(async (path) => {
+    const url = await requestPhotoUrl(path)
+    if (url) window.open(url, '_blank', 'noopener')
+    else showToast('Could not open that photo', 'error')
+  }, [])
+
+  const handleSavePo = useCallback(async (po, items, { send = false } = {}) => {
+    const s = stamp()
+    // On account: confirmed straight to awaiting delivery — paid later from their invoice, when due
+    const onAccount = send && po.terms === 'credit' && po.kind !== 'credit_note'
+    const row = { ...po, items: undefined,
+      status: send ? (onAccount ? 'awaiting_delivery' : 'awaiting_payment') : (po.status || 'draft'),
+      ...(send ? { sent_at: s.at, sent_by: s.userName } : {}),
+      ...(onAccount && po.delivery_date && !po.delivery_confirmed_at ? { delivery_confirmed_at: s.at, delivery_confirmed_by: s.userName } : {}),
+      created_by: po.created_by || s.userName }
+    const saved = await savePurchaseOrder(row, items)
+    try { await syncRequestLinks(saved) } catch { /* the order is saved; links catch up next save */ }
+    await refreshPurchases()
+    // Saving a PO teaches its products this supplier and price (in the database): pick that up
+    reloadStockItems()
+    setPoDraft(null)
+    if (send) {
+      setOpenPo(saved.id)
+      log({ entity_type: 'purchase', entity_id: saved.id, entity_name: saved.po_number, action: onAccount ? 'Confirmed on account' : 'Sent for payment',
+        detail: `${saved.supplier_name} · ${items.length} lines · ${saved.total}${onAccount && saved.payment_due_at ? ` · pay by ${saved.payment_due_at}` : ''}`, source: 'purchasing' })
+      if (onAccount) showToast(`${saved.po_number} confirmed — on account, awaiting delivery`, 'success', { label: 'View', run: () => setOpenPo(saved.id) })
+      else showToast(saved.kind === 'credit_note' ? `${saved.po_number} recorded — ${fmt(Math.abs(saved.total))} due back` : `${saved.po_number} sent for payment`,
+        'success', saved.kind === 'credit_note' ? { label: 'View', run: () => setOpenPo(saved.id) } : { label: 'View', run: () => { navigateTo('payments') } })
+    } else {
+      const live = saved.status && saved.status !== 'draft'
+      log({ entity_type: 'purchase', entity_id: saved.id, entity_name: saved.po_number, action: live ? 'Edited' : 'Draft saved',
+        ...(live ? { detail: `Edited while ${String(saved.status).replace(/_/g, ' ')} · ${items.length} lines · ${saved.total}`, source: 'purchasing' } : {}) })
+      showToast(live ? `${saved.po_number} updated` : `${saved.po_number} saved as a draft`)
+    }
+    return saved
+  }, [refreshPurchases, stamp, navigateTo, syncRequestLinks, reloadStockItems])
+
+  const handleMarkPaid = useCallback(async (po, payment) => {
+    const s = stamp()
+    await updatePurchaseOrder(po.id, {
+      payment_status: 'paid', paid_at: new Date(payment.paid_at || Date.now()).toISOString(), paid_by: s.userName,
+      payment_method: payment.method, payment_reference: payment.reference || null,
+      status: po.status === 'awaiting_payment' ? 'awaiting_delivery' : po.status,
+    })
+    await refreshPurchases()
+    log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Marked as paid',
+      detail: `${po.total} · ${payment.method}${payment.reference ? ` · ${payment.reference}` : ''}`, source: 'purchasing' })
+    showToast(`${po.po_number} marked as paid`)
+  }, [refreshPurchases, stamp])
+
+  /** Record what actually turned up. Part deliveries are normal. */
+  const handleReceive = useCallback(async (po, lines) => {
+    for (const l of lines) await updatePoItem(l.id, { qty_received: l.qty_received })
+    const items = (po.items || []).map(i => ({ ...i, qty_received: lines.find(l => l.id === i.id)?.qty_received ?? i.qty_received }))
+    const r = poReceived(items)
+    await updatePurchaseOrder(po.id, {
+      status: po.status === 'completed' ? 'completed' : r.complete ? 'received' : r.started ? 'partially_received' : po.status,
+      received_at: r.started ? new Date().toISOString() : null,
+    })
+    await refreshPurchases()
+    log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Delivery recorded',
+      detail: `${r.received} of ${r.ordered} received`, source: 'purchasing' })
+    showToast(r.complete ? 'Everything recorded as arrived' : `${r.received} of ${r.ordered} recorded`)
+  }, [refreshPurchases])
+
+  /** A delivery date the supplier has given — or taken back. */
+  const handleConfirmDelivery = useCallback(async (po, { date, note }) => {
+    const s = stamp()
+    await updatePurchaseOrder(po.id, date
+      ? { delivery_date: date, delivery_note: note, delivery_confirmed_at: s.at, delivery_confirmed_by: s.userName }
+      : { delivery_date: null, delivery_note: null, delivery_confirmed_at: null, delivery_confirmed_by: null })
+    await refreshPurchases()
+    const nice = date ? new Date(date + 'T00:00:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }) : ''
+    log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number,
+      action: !date ? 'Delivery date taken off' : po.delivery_date ? 'Delivery date changed' : 'Delivery date confirmed',
+      detail: date ? `${po.delivery_date && po.delivery_date !== date ? `${po.delivery_date} → ` : ''}${date}${note ? ` · ${note}` : ''}` : null,
+      source: 'purchasing' })
+    showToast(date ? `Delivery confirmed for ${nice}` : 'Delivery date taken off')
+  }, [refreshPurchases, stamp])
+
+  /** A line on back order, or cancelled by the supplier. */
+  const handleLineStatus = useCallback(async (po, item, patch) => {
+    await updatePoItem(item.id, { line_status: patch.line_status, back_order_date: patch.back_order_date || null })
+    // Cancelling the last thing still to come can finish the delivery
+    const items = (po.items || []).map(i => (i.id === item.id ? { ...i, ...patch } : i))
+    const r = poReceived(items)
+    if (!['draft', 'cancelled', 'completed'].includes(po.status) && (r.complete || r.allCancelled) && !['received'].includes(po.status)) {
+      await updatePurchaseOrder(po.id, { status: 'received', received_at: po.received_at || new Date().toISOString() })
+    }
+    await refreshPurchases()
+    const label = { due: 'back with the order', back_order: `on back order${patch.back_order_date ? ` until ${patch.back_order_date}` : ' (date TBC)'}`, cancelled: 'cancelled by the supplier' }[patch.line_status]
+    log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Line updated',
+      detail: `${item.name} — ${label}`, source: 'purchasing' })
+    showToast(`${item.name} marked ${label}`)
+  }, [refreshPurchases])
+
+  /** A typed-in line turns out to be (or becomes) one of your products. */
+  const handleLinkPoLine = useCallback(async (po, item, si) => {
+    await updatePoItem(item.id, {
+      stock_item_id: si.id, name: si.name, supplier_sku: item.supplier_sku || si.data?.supplierSku || null,
+      data: { ...(item.data || {}), typedName: item.name, systemCost: parseFloat(si.data?.costPrice) || null },
+    })
+    for (const rid of item.data?.requestIds || []) {
+      const r = stockRequests.find(x => x.id === rid)
+      if (r && !r.stock_item_id) {
+        await updateStockRequest(rid, { stock_item_id: si.id, product_name: si.name, data: { ...(r.data || {}), askedAs: r.product_name } })
+        await addRequestEvent(rid, meRef.current?.name || null, 'Matched to a product', `“${r.product_name}” → ${si.name}`)
+      }
+    }
+    await refreshPurchases()
+    refreshRequests()
+    log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Line linked to a product',
+      detail: `“${item.name}” → ${si.name}`, source: 'purchasing' })
+    showToast(`Linked to ${si.name}`)
+  }, [refreshPurchases, refreshRequests, stockRequests])
+
+  const handlePoDoc = useCallback(async (po, file, kind, value) => {
+    let patch = {}
+    if (kind === 'invoice_details') patch = {
+      invoice_number: String(value?.number || '').trim() || null,
+      invoice_total: value?.total === '' || value?.total == null ? null : parseFloat(value.total),
+    }
+    // Sometimes the document they sent up front turns out to be the invoice
+    else if (kind === 'invoice_is_proforma' || kind === 'use_proforma_as_invoice') {
+      patch = { invoice_path: po.proforma_path, data: { ...(po.data || {}), proformaIsInvoice: true } }
+    }
+    else if (!file) patch = { [kind === 'invoice' ? 'invoice_path' : 'proforma_path']: null }
+    else {
+      const path = await uploadPurchaseDoc(file, po.po_number, kind)
+      patch = { [kind === 'invoice' ? 'invoice_path' : 'proforma_path']: path }
+    }
+    await updatePurchaseOrder(po.id, patch)
+    await refreshPurchases()
+    if (file) {
+      log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: `${kind === 'invoice' ? 'Invoice' : 'Proforma'} uploaded`, source: 'purchasing' })
+      showToast(`${kind === 'invoice' ? 'Invoice' : 'Proforma'} attached`)
+    } else if (kind === 'use_proforma_as_invoice') {
+      log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Proforma used as the final invoice', source: 'purchasing' })
+      showToast('Saved as the final invoice')
+    } else if (kind === 'invoice_details') {
+      log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Invoice details saved',
+        detail: [value.invoice_number, value.invoice_total != null ? `£${value.invoice_total}` : null].filter(Boolean).join(' · '), source: 'purchasing' })
+      showToast('Invoice details saved')
+    }
+  }, [refreshPurchases])
+
+  const handleViewDoc = useCallback(async (path) => {
+    const url = await purchaseDocUrl(path)
+    if (url) window.open(url, '_blank', 'noopener')
+    else showToast('Could not open that file', 'error')
+  }, [])
+
+  const handleRaiseIssue = useCallback(async (po, payload) => {
+    const s = stamp()
+    await saveIssue({ po_id: po.id, po_item_id: payload.po_item_id || null, kind: payload.kind,
+      qty: parseFloat(payload.qty) || 0, value: payload.value || 0, description: payload.description || null,
+      status: 'reported', reported_by: s.userName })
+    await refreshPurchases()
+    log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Problem reported',
+      detail: `${payload.kind}${payload.qty ? ` · ${payload.qty} units` : ''}${payload.description ? ` · ${payload.description}` : ''}`, source: 'purchasing' })
+    showToast('Reported — chase it in Delivery Problems')
+  }, [refreshPurchases, stamp])
+
+  const handleUpdateIssue = useCallback(async (issue, patch) => {
+    const s = stamp()
+    const closing = patch.status && !['reported', 'chasing', 'replacement_due'].includes(patch.status)
+    await saveIssue({ ...issue, ...patch, ...(closing ? { resolved_at: s.at, resolved_by: s.userName } : {}) })
+    await refreshPurchases()
+    if (patch.status) log({ entity_type: 'purchase', entity_id: issue.po_id, action: `Problem: ${patch.status.replace('_', ' ')}`, source: 'purchasing' })
+  }, [refreshPurchases, stamp])
+
+  const handleCompletePo = useCallback(async (po) => {
+    const s = stamp()
+    await updatePurchaseOrder(po.id, { status: 'completed', completed_at: s.at, completed_by: s.userName })
+    await refreshPurchases()
+    log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Completed', source: 'purchasing' })
+    // What you actually paid becomes a proposed cost change, for approval
+    let raised = 0
+    try { raised = await raiseProposals(purchaseCostProposals(po, stockItems)) } catch { /* the order is still complete */ }
+    showToast(raised
+      ? `${po.po_number} completed — ${raised} cost change${raised !== 1 ? 's' : ''} proposed from the prices paid`
+      : `${po.po_number} completed`, 'success',
+      raised ? { label: 'Review', run: () => navigateTo('approvals', 'changes') } : null)
+    setOpenPo(null)
+  }, [refreshPurchases, stamp, stockItems, raiseProposals, navigateTo])
+
+  const handleCancelPo = useCallback(async (po) => {
+    await updatePurchaseOrder(po.id, { status: 'cancelled' })
+    await refreshPurchases()
+    log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Cancelled', source: 'purchasing' })
+    showToast(`${po.po_number} cancelled`)
+    setOpenPo(null)
+  }, [refreshPurchases])
+
+  // Get from anything to anything: every link chip in the portal uses these
+  const links = useMemo(() => ({
+    openSupplier: (name) => {
+      const s = supplierForName(name, suppliers)
+      // Carriers and agencies have their own lists now
+      navigateTo(s ? directoryOf(s) : 'suppliers', s ? s.id : null)
+    },
+    openBrand: (name) => navigateTo('brands', encodeURIComponent(name)),
+    openProduct: (id) => navigateTo('stock', id),
+    openListing: (id) => {
+      const isLive = liveProducts.some(lp => lp.saved_product_id === id && lp.status !== 'removed')
+      navigateTo(isLive ? 'live' : 'saved', id)
+    },
+  }), [suppliers, liveProducts, navigateTo])
+
+  const handleSignOut = async () => { await supabase.auth.signOut() }
+
+  if (session === undefined) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-paper">
+        <div className="w-8 h-8 border-2 border-royal-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+  if (!session) return <LoginPage />
+
+  // Archived listings are hidden from every working view
+  const activeProducts = savedProducts.filter(p => !p.data?.archived)
+  const archivedCount = savedProducts.length - activeProducts.length
+
+  const liveCount = liveProducts.filter(lp => lp.status === 'live').length
+  const reviewCount = activeProducts.filter(p => (p.data?.reviewStatus || 'none') === 'review').length
+  const everLiveIds = new Set(liveProducts.filter(lp => lp.status !== 'removed').map(lp => lp.saved_product_id))
+  const savedCount = activeProducts.filter(p => !everLiveIds.has(p.id)).length
+
+  // Everything findable with ⌘K lives in one place — see src/lib/search.js,
+  // which every new module must be added to.
+  // Building the search index touches every record, so only do it while search is open
+  const commandItems = !commandOpen ? [] : buildSearchItems({
+    me, nav: NAV, listings: activeProducts, liveIds: everLiveIds, products: stockItems,
+    purchaseOrders, companies: suppliers, hunts, directoryOf, packaging: settings?.packaging || [], dispatch: dispatchIndex,
+    requests: stockRequests, deliveries: goodsIn.deliveries, inventory, claims: claimsIndex,
+    go: (page, id) => navigateTo(page, id), openPo: (id) => setOpenPo(id),
+  })
+  const visibleCommands = searchItems(commandItems, commandQuery)
+
+  const sees = seesCosts(me)
+  const restockList = (inventory?.products || []).map(p => ({ ...p, st: stockState(p) }))
+    .filter(p => needsRestock(p.st) && !p.request)
+    .sort((a, b) => (a.st.cover ?? 0) - (b.st.cover ?? 0))
+  const todayLondon = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date())
+  // Phones: up to four everyday pages along the bottom, warehouse ones first, then whatever else this person uses
+  const mine = visibleNav(me).flatMap(g => g.items)
+  const tabBar = [...TAB_ORDER.map(id => mine.find(i => i.id === id)).filter(Boolean), ...mine.filter(i => !TAB_ORDER.includes(i.id))].slice(0, 4)
+  const navCountFor = (id) => {
+    if (id === 'saved') return savedCount
+    if (id === 'approvals') return reviewCount + proposals.filter(p => p.status === 'pending').length
+    if (id === 'live') return liveCount
+    if (id === 'archive') return archivedCount
+    if (id === 'dispatch') return dispatchIndex.batches.filter(b => !b.printed_at && b.ship_date === todayLondon).length
+    if (id === 'requests') return canAccess(me, 'purchases') ? stockRequests.filter(r => requestState(r).needsOffice).length : 0
+    if (id === 'tasks') return (inventory?.tasks || []).filter(t => t.status === 'open').length + (inventory?.products || []).filter(needsPickShelf).length
+    if (id === 'tracking') return openParcels.filter(p => needsAttention(p)).length
+    if (id === 'claims') return claimsIndex.filter(c => c.status === 'to_raise').length
+    if (id === 'stock-planning') return (inventory?.products || []).filter(p => stockState(p).spike).length
+    if (id === 'inventory') return restockList.filter(p => ['out', 'low'].includes(p.st.state)).length
+    if (id === 'goods-in') {
+      if (canAccess(me, 'purchases')) return goodsIn.deliveries.filter(deliveryNeedsOffice).length
+      const g = groupExpected(goodsIn.orders)
+      return g.overdue.length + g.today.length + goodsIn.deliveries.filter(d => !d.put_away_at && deliveryUnits(d) > 0).length
+    }
+    return 0
+  }
+
+  return (
+    <LinksProvider value={links}>
+    <div className="flex min-h-screen bg-paper">
+      {/* Mobile overlay */}
+      {sidebarOpen && <div className="fixed inset-0 bg-ink/30 backdrop-blur-[2px] z-20 lg:hidden" onClick={() => setSidebarOpen(false)} />}
+
+      {/* Sidebar */}
+      <aside aria-label="Main menu" className={`fixed top-0 left-0 h-dvh pb-[env(safe-area-inset-bottom)] w-[min(258px,85vw)] lg:w-[258px] bg-white border-r border-rule flex flex-col z-30 transform transition-transform duration-200
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 lg:sticky lg:top-0 lg:z-auto lg:flex-shrink-0 ${railHidden ? 'lg:hidden' : ''}`}>
+
+        <button onClick={toggleRail} className="hidden lg:flex absolute top-5 right-3 icon-btn" aria-label="Hide the menu" title="Hide the menu (full-width page)">
+          <Icon name="chevronLeft" size={16} />
+        </button>
+        <div className="px-5 pt-6 pb-4">
+          <img src="/logo.png" alt="Good &amp; General" width="158" height="50" decoding="async" className="w-full max-w-[158px] h-auto" />
+          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink/35 mt-3">Commerce operations</div>
+        </div>
+
+        <div className="px-3 pb-4">
+          <button
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 border border-rule rounded-[5px] bg-paper/55 text-ink/45 hover:border-royal-200 hover:text-royal-600 transition-colors text-left"
+            onClick={() => { setCommandQuery(''); setCommandOpen(true) }}
+          >
+            <Icon name="search" size={15} />
+            <span className="text-xs flex-1">Search anything</span>
+            <span className="command-kbd hidden [@media(pointer:fine)]:inline">⌘K</span>
+          </button>
+        </div>
+
+        <nav className="flex-1 px-3 pb-4 overflow-y-auto">
+          {visibleNav(me).map((group, groupIndex) => (
+            <div key={group.label} className={groupIndex ? 'pt-4' : ''}>
+              <div className="nav-section">{group.label}</div>
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const count = navCountFor(item.id)
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => { setPage(item.id); setSidebarOpen(false) }}
+                      onPointerEnter={() => prefetchPage(item.id)}
+                      onFocus={() => prefetchPage(item.id)}
+                      aria-current={page === item.id ? 'page' : undefined}
+                      className={`nav-item ${page === item.id ? 'nav-item-active' : ''}`}
+                    >
+                      <Icon name={item.icon} size={16} className="flex-shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                      {count > 0 && <span className="nav-count">{count}</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        <div className="px-4 py-4 border-t border-rule">
+          {me && (
+            <div className="flex items-center gap-2.5 mb-2">
+              <div className="w-8 h-8 rounded-[5px] bg-royal-500 text-white flex items-center justify-center text-sm font-semibold flex-shrink-0">
+                {me.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-medium text-ink truncate">{me.name}</div>
+                <div className="text-xs text-ink/45 truncate">{me.role === 'member' ? 'Homey International' : me.role}</div>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+            <div className="flex items-center gap-3">
+              <button onClick={handleSignOut} className="text-xs text-ink/45 hover:text-royal-600 transition-colors whitespace-nowrap py-1">Sign out</button>
+              <button onClick={toggleNicknames} role="switch" aria-checked={nickOn}
+                className="text-xs text-ink/55 hover:text-royal-600 transition-colors whitespace-nowrap inline-flex items-center gap-1.5 py-1"
+                title="Show products by their nickname or their full name — your own choice">
+                <span className={`inline-block w-7 h-4 rounded-full relative transition-colors ${nickOn ? 'bg-royal-500' : 'bg-ink/20'}`}>
+                  <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${nickOn ? 'left-3.5' : 'left-0.5'}`} />
+                </span>
+                Nicknames
+              </button>
+              <button onClick={() => refreshShared({ silent: false })}
+                className="text-xs text-ink/35 hover:text-royal-600 transition-colors whitespace-nowrap inline-flex items-center gap-1 py-1"
+                title={`Data last read ${new Date(lastRefresh).toLocaleTimeString('en-GB')} — click to refresh now`}>
+                <Icon name="clock" size={12} /> {freshnessLabel}
+              </button>
+            </div>
+            <span className="text-[11px] text-ink/35 tabular-nums"
+              title={BUILD_TIME ? `Built ${new Date(BUILD_TIME).toLocaleString('en-GB')}` : ''}>
+              v{VERSION}{BUILD_TIME ? ` · ${new Date(BUILD_TIME).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ${new Date(BUILD_TIME).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : ''}
+            </span>
+          </div>
+        </div>
+      </aside>
+
+      {/* Laptops: the menu is hidden — one click brings it back */}
+      {railHidden && (
+        <button onClick={toggleRail} className="hidden lg:flex fixed top-4 left-4 z-30 items-center gap-1.5 px-3 h-9 rounded-full bg-white border border-rule shadow-sm text-sm text-ink/70 hover:text-royal-600 hover:border-royal-200"
+          aria-label="Show the menu" title="Show the menu">
+          <Icon name="menu" size={16} /> Menu
+        </button>
+      )}
+
+      {/* Main */}
+      <main className="flex-1 flex flex-col min-w-0">
+        {/* Top bar (mobile) */}
+        <div className="lg:hidden flex items-center gap-3 px-4 h-14 bg-white border-b border-rule sticky top-0 z-10">
+          <button onClick={() => setSidebarOpen(true)} className="icon-btn -ml-1" aria-label="Open menu" aria-expanded={sidebarOpen}><Icon name="menu" size={20} /></button>
+          <span className="font-semibold text-ink flex-1 truncate">{pageLabel(page)}</span>
+          <button className="icon-btn -mr-1" aria-label="Search" onClick={() => { setCommandQuery(''); setCommandOpen(true) }}><Icon name="search" size={18} /></button>
+        </div>
+
+        <div className={`flex-1 px-4 py-5 sm:px-7 sm:py-7 lg:px-10 lg:py-9 xl:px-12 w-full ${railHidden ? 'lg:max-w-none' : 'max-w-[1500px]'} ${tabBar.length ? 'pb-24 lg:pb-9' : ''} ${railHidden ? 'lg:pt-[4.5rem]' : ''}`}>
+          {loading || !settings ? <Spinner /> : (
+            <Suspense fallback={<Spinner />}>
+              {!allowed && (
+                <NoAccess page={page} me={me} onNavigate={navigateTo}
+                  admins={profiles.filter(p => p.role === 'admin' && p.active !== false && p.id !== me?.id)} />
+              )}
+              {allowed && page === 'requests' && (
+                <div>
+                <StockRequestsPage
+                  me={me}
+                  focusId={focusId}
+                  requests={stockRequests}
+                  products={requestProducts}
+                  people={settings?.dispatch?.people?.length ? settings.dispatch.people : ['Ankesh', 'Sagar']}
+                  canOrder={canAccess(me, 'purchases')}
+                  purchaseOrders={purchaseOrders}
+                  stockItems={stockItems}
+                  suppliers={suppliers}
+                  onRaise={handleRaiseRequest}
+                  onUpdate={handleUpdateRequest}
+                  onAcknowledge={handleAcknowledgeRequests}
+                  onDecline={handleDeclineRequest}
+                  onRaisePo={handleRaisePoFromRequests}
+                  onLinkToOrder={handleLinkRequestToOrder}
+                  onUnlinkOrder={handleUnlinkRequest}
+                  onLinkProduct={handleLinkRequestProduct}
+                  onCreateProduct={handleAddStockItem}
+                  onViewPhoto={handleViewRequestPhoto}
+                  onRefresh={() => { refreshRequests(); refreshInventory() }}
+                  onOpenPo={(id) => setOpenPo(id)}
+                  restock={restockList}
+                  onOpenStock={canAccess(me, 'inventory') ? () => navigateTo('inventory') : null}
+                />
+                </div>
+              )}
+              {allowed && page === 'notifications' && (
+                <div><NotificationsPage showToast={showToast} /></div>
+              )}
+              {allowed && page === 'goods-in' && (
+                <div>
+                <GoodsInPage
+                  me={me}
+                  focusId={focusId}
+                  orders={goodsIn.orders}
+                  deliveries={goodsIn.deliveries}
+                  people={settings?.dispatch?.people?.length ? settings.dispatch.people : ['Ankesh', 'Sagar']}
+                  canOrder={canAccess(me, 'purchases')}
+                  purchaseOrders={purchaseOrders}
+                  suppliers={suppliers.filter(x => directoryOf(x) === 'suppliers')}
+                  onBookIn={handleBookIn}
+                  onUnexpected={handleUnexpectedDelivery}
+                  onUpdateDelivery={handleUpdateDelivery}
+                  onUploadPhoto={handleGoodsInPhoto}
+                  onViewPhoto={handleViewGoodsInPhoto}
+                  onRefresh={refreshGoodsIn}
+                  onOpenPo={(id) => setOpenPo(id)}
+                  inventory={inventory}
+                  office={sees}
+                  showToast={showToast}
+                  onPutAwayDone={() => { refreshGoodsIn(); refreshInventory() }}
+                />
+                </div>
+              )}
+              {allowed && page === 'inventory' && (
+                <div>
+                <InventoryPage
+                  me={me}
+                  focusId={focusId}
+                  inventory={inventory}
+                  people={settings?.dispatch?.people?.length ? settings.dispatch.people : ['Ankesh', 'Sagar']}
+                  office={sees}
+                  canEdit={canAccess(me, 'inventory')}
+                  stockItems={sees ? stockItems : []}
+                  onStockItemsChanged={reloadStockItems}
+                  showToast={showToast}
+                  onRefresh={refreshInventory}
+                  onNavigate={navigateTo}
+                  canRequest={canAccess(me, 'requests')}
+                  canOrder={canAccess(me, 'purchases')}
+                  requests={stockRequests}
+                  requestProducts={requestProducts}
+                  onRaise={async (form) => { const row = await handleRaiseRequest(form); if (row) refreshInventory(); return row }}
+                />
+                </div>
+              )}
+              {allowed && page === 'tasks' && (
+                <div>
+                <WarehouseTasksPage
+                  me={me}
+                  focusId={focusId}
+                  inventory={inventory}
+                  people={settings?.dispatch?.people?.length ? settings.dispatch.people : ['Ankesh', 'Sagar']}
+                  office={sees}
+                  showToast={showToast}
+                  onRefresh={refreshInventory}
+                  onNavigate={navigateTo}
+                />
+                </div>
+              )}
+              {allowed && page === 'tracking' && (
+                <div>
+                <TrackingPage showToast={showToast} />
+                </div>
+              )}
+              {allowed && page === 'stock-planning' && (
+                <div>
+                <StockPlanningPage inventory={inventory} stockItems={stockItems} sees={seesCosts(me)} onOrderStock={handleOrderStock}
+                  onNavigate={(p, id) => navigateTo(p, id)} showToast={showToast} />
+                </div>
+              )}
+              {allowed && page === 'order-audit' && (
+                <div>
+                <OrderAuditPage canOpen={(id) => canAccess(me, id)} onNavigate={(p, id) => navigateTo(p, id)} me={me} onLog={log} showToast={showToast} inventory={inventory} />
+                </div>
+              )}
+              {allowed && page === 'print-station' && (
+                <div>
+                <PrintStationPage me={me} showToast={showToast} />
+                </div>
+              )}
+              {allowed && page === 'not-listed' && (
+                <div>
+                <NotListedPage stockItems={stockItems} savedProducts={savedProducts} liveProducts={liveProducts} inventory={inventory} settings={settings}
+                  sees={seesCosts(me)} onCreateListing={handleCreateListing} onOpenProduct={(id) => navigateTo('stock', id)} onNavigate={(p, id) => navigateTo(p, id)} />
+                </div>
+              )}
+              {allowed && page === 'returns' && (
+                <div>
+                <ReturnsPage me={me} showToast={showToast} inventory={inventory} />
+                </div>
+              )}
+              {allowed && page === 'customer-care' && (
+                <div>
+                <CustomerCarePage me={me} showToast={showToast} inventory={inventory} stockItems={stockItems} onNavigate={(p, id) => navigateTo(p, id)} />
+                </div>
+              )}
+              {allowed && page === 'claims' && (
+                <div>
+                <ClaimsPage me={me} showToast={showToast} carriers={suppliers.filter(s => directoryOf(s) === 'carriers')}
+                  savedProducts={savedProducts} liveProducts={liveProducts} focusId={focusId} onNavigate={(p, id) => navigateTo(p, id)} />
+                </div>
+              )}
+              {allowed && page === 'dispatch-dashboard' && (
+                <div>
+                <DispatchDashboardPage me={me} settings={settings} showToast={showToast} />
+                </div>
+              )}
+              {allowed && page === 'dispatch' && (
+                <div>
+                <DispatchPage
+                  me={me}
+                  focusId={focusId}
+                  onNavigate={navigateTo}
+                  showToast={showToast}
+                  onLog={log}
+                  onChanged={refreshDispatch}
+                  settings={settings}
+                  onUpdateSettings={handleUpdateSettings}
+                />
+                </div>
+              )}
+              {allowed && page === 'packaging' && (
+                <div>
+                <PackagingPage
+                  focusId={focusId}
+                  savedProducts={activeProducts}
+                  liveProducts={liveProducts}
+                  stockItems={stockItems}
+                  settings={settings}
+                  me={me}
+                  onNavigate={navigateTo}
+                  onBulkPackaging={handleBulkPackaging}
+                  inventory={inventory}
+                  onRefreshInventory={refreshInventory}
+                  onUpdateSettings={handleUpdateSettings}
+                  onAddStockItem={handleAddStockItem}
+                  onUpdateStockItem={handleUpdateStockItem}
+                />
+                </div>
+              )}
+              {allowed && page === 'purchases' && (
+                <div>
+                <PurchasesPage
+                  orders={purchaseOrders} issues={purchaseIssues} suppliers={suppliers} me={me}
+                  focusId={focusId} onNavigate={navigateTo}
+                  onNew={() => handleNewPo()} onNewCredit={() => handleRaiseCredit(null)} onOpen={(po) => setOpenPo(po.id)}
+                  onAttachDocs={() => setAttachingDocs(true)}
+                  onNewFromDocument={handleNewFromDocument}
+                />
+                </div>
+              )}
+              {allowed && page === 'payments' && (
+                <div>
+                <PaymentsPage
+                  orders={purchaseOrders}
+                  onOpen={(po) => setOpenPo(po.id)}
+                  onMarkPaid={handleMarkPaid}
+                  onViewDoc={handleViewDoc}
+                />
+                </div>
+              )}
+              {allowed && page === 'issues' && (
+                <div>
+                <IssuesPage
+                  issues={purchaseIssues} orders={purchaseOrders}
+                  onOpen={(po) => setOpenPo(po.id)} onUpdate={handleUpdateIssue}
+                />
+                </div>
+              )}
+              {allowed && page === 'team' && (
+                <div>
+                <TeamPage
+                  profiles={profiles}
+                  me={me}
+                  onCreate={handleCreateUser}
+                  onUpdate={handleUpdateUser}
+                  onSetPassword={handleSetUserPassword}
+                />
+                </div>
+              )}
+              {allowed && page === 'dashboard' && (
+                <div>
+                <DashboardPage
+                  purchaseOrders={purchaseOrders}
+                  purchaseIssues={purchaseIssues}
+                  proposals={proposals}
+                  suppliers={suppliers}
+                  catalogueStats={catalogueStats}
+                  syncStatus={syncStatus}
+                  hunts={hunts}
+                  huntItems={huntItems}
+                  savedProducts={activeProducts}
+                  liveProducts={liveProducts}
+                  stockItems={stockItems}
+                  settings={settings}
+                  priceHistory={priceHistory}
+                  costHistory={costHistory}
+                  me={me}
+                  onNavigate={navigateTo}
+                />
+                </div>
+              )}
+              {allowed && page === 'calculator' && (
+                <div>
+                <CalculatorPage
+                  settings={settings}
+                  stockItems={stockItems}
+                  savedProducts={activeProducts}
+                  onCreateStockItem={handleAddStockItem}
+                  onSaveProduct={handleSaveProduct}
+                  onUpdateProduct={handleUpdateProduct}
+                  calc={calc}
+                  setCalc={setCalc}
+                  loadedProductId={loadedProductId}
+                  setLoadedProductId={setLoadedProductId}
+                  loadedProductName={loadedProductName}
+                  setLoadedProductName={setLoadedProductName}
+                />
+                </div>
+              )}
+              {allowed && page === 'families' && (
+                <div>
+                <FamiliesPage
+                  onCreateListing={handleCreateListing}
+                  savedProducts={activeProducts}
+                  liveProducts={liveProducts}
+                  stockItems={stockItems}
+                  settings={settings}
+                  onNavigate={navigateTo}
+                />
+                </div>
+              )}
+              {allowed && page === 'shipping' && (
+                <div>
+                <ShippingPage
+                  savedProducts={activeProducts}
+                  liveProducts={liveProducts}
+                  stockItems={stockItems}
+                  settings={settings}
+                  onNavigate={navigateTo}
+                  onProposeCarrier={handleProposeCarrier}
+                  pendingCarrier={new Set(proposals.filter(p => p.kind === 'carrier' && p.status === 'pending').map(p => p.target_id))}
+                />
+                </div>
+              )}
+              {allowed && page === 'approvals' && (
+                <div>
+                  <ApprovalsPage
+                    tab={focusId === 'changes' ? 'changes' : 'listings'}
+                    onTab={(t) => navigateTo('approvals', t)}
+                    listingCount={reviewCount}
+                    changeCount={proposals.filter(p => p.status === 'pending').length}
+                    reviewProps={{ savedProducts: activeProducts, stockItems: stockItems, settings: settings, liveProducts: liveProducts, onApprove: handleApproveReview, onSendBack: handleSendBackReview, onLoad: handleLoadProduct , onSaveChanges: handleUpdateProduct}}
+                    changesProps={{ proposals: proposals, savedProducts: activeProducts, stockItems: stockItems, settings: settings, onDecide: handleDecideProposals, onScan: handleScanForChanges, onNavigate: navigateTo }}
+                  />
+                </div>
+              )}
+              {allowed && page === 'hunter' && !marketLoaded && <Spinner />}
+              {allowed && page === 'hunter' && marketLoaded && (
+                <div>
+                <HunterPage
+                  hunts={hunts}
+                  huntItems={huntItems}
+                  focusId={page === 'hunter' ? focusId : null}
+                  liveProducts={liveProducts}
+                  onCreateHunts={handleCreateHunts}
+                  onUpdateHunt={handleUpdateHunt}
+                  onSetDisposition={handleSetDisposition}
+                  marketListings={marketListings}
+                  loadHuntCatalogue={loadCatalogueForHunt}
+                  suppliers={suppliers}
+                  asinMatches={asinMatches}
+                  savedProducts={activeProducts}
+                  stockItems={stockItems}
+                  settings={settings}
+                  onImportHelium={handleImportHelium}
+                  onDecideMatch={handleDecideMatch}
+                  onSendToReview={handleSendToReview}
+                  onNavigate={navigateTo}
+                />
+                </div>
+              )}
+              {allowed && page === 'stock' && (
+                <div>
+                <StockItemsPage
+                  onNavigate={navigateTo}
+                  focusId={focusId}
+                  stockItems={stockItems}
+                  sees={sees}
+                  inventory={inventory}
+                  onRefreshInventory={refreshInventory}
+                  me={me}
+                  onStockItemsChanged={reloadStockItems}
+                  priceHistory={priceHistory}
+                  onLiveStatusChange={handleLiveStatusChange}
+                  onRemoveLive={handleRemoveLive}
+                  onUpdateLivePrice={handleUpdateLivePrice}
+                  onOpenInventory={canAccess(me, 'inventory') ? (id) => navigateTo('inventory', id) : null}
+                  savedProducts={activeProducts}
+                  liveProducts={liveProducts}
+                  settings={settings}
+                  onAddStockItem={handleAddStockItem}
+                  onUpdateStockItem={handleUpdateStockItem}
+                  onDeleteStockItem={handleDeleteStockItem}
+                  onCreateListing={handleCreateListing}
+                  onOrderStock={handleOrderStock}
+                  onRestoreStockItem={handleRestoreStockItem}
+                  onRunMigration={handleRunMigration}
+                  onLinkListings={handleLinkListings}
+                  showToast={showToast}
+                  onUnlinkListings={handleUnlinkListings}
+                />
+                </div>
+              )}
+              {allowed && page === 'saved' && (
+                <div>
+                <SavedPage
+                  onOrderStock={handleOrderStock}
+                  focusId={focusId}
+                  savedProducts={activeProducts}
+                  stockItems={stockItems}
+                  settings={settings}
+                  liveProducts={liveProducts}
+                  onDelete={handleDeleteProduct}
+                  onLoad={handleLoadProduct}
+                  onRename={handleRenameProduct}
+                  onPushLive={handlePushLive}
+                  onLoadActivity={loadActivity}
+                  onSendReview={handleSendReview}
+                />
+                </div>
+              )}
+              {allowed && page === 'live' && (
+                <div>
+                <LiveProductsPage
+                  onOrderStock={handleOrderStock}
+                  onNavigate={navigateTo}
+                  focusId={focusId}
+                  liveProducts={liveProducts}
+                  savedProducts={activeProducts}
+                  stockItems={stockItems}
+                  settings={settings}
+                  priceHistory={priceHistory}
+                  costHistory={costHistory}
+                  onStatusChange={handleLiveStatusChange}
+                  onRemove={handleRemoveLive}
+                  onUpdatePrice={handleUpdateLivePrice}
+                />
+                </div>
+              )}
+
+              {allowed && page === 'brands' && (
+                <div>
+                <PortfolioPage
+                  focusId={focusId}
+                  onNavigate={navigateTo}
+                  groupBy="brand"
+                  title="Brands"
+                  icon="tag"
+                  unlabelled="No brand set"
+                  emptyHint="Brands appear here once you have live products with a brand name"
+                  liveProducts={liveProducts}
+                  savedProducts={activeProducts}
+                  stockItems={stockItems}
+                  settings={settings}
+                />
+                </div>
+              )}
+              {allowed && ['suppliers', 'carriers', 'companies'].includes(page) && (
+                <div>
+                <SuppliersPage
+                  scope={page}
+                  onAddCompany={(scope) => setAddingCompany(scope)}
+                  purchaseOrders={purchaseOrders}
+                  onOpenPo={(po) => setOpenPo(po.id)}
+                  focusId={focusId}
+                  onNavigate={navigateTo}
+                  suppliers={suppliers}
+                  catalogueStats={catalogueStats}
+                  syncStatus={syncStatus}
+                  imports={priceImports}
+                  stockItems={stockItems}
+                  savedProducts={activeProducts}
+                  liveProducts={liveProducts}
+                  settings={settings}
+                  proposals={proposals}
+                  onImport={handleImportList}
+                  onUpdateSupplier={handleUpdateSupplier}
+                  onSyncNow={handleSyncNow}
+                />
+                </div>
+              )}
+              {allowed && page === 'bulk' && (
+                <div>
+                <BulkUploadPage
+                  stockItems={stockItems}
+                  settings={settings}
+                  onBulkImport={handleBulkImport}
+                />
+                </div>
+              )}
+              {allowed && page === 'buildmonth' && (
+                <div>
+                <BuildMonthPage
+                  months={months}
+                  settings={settings}
+                  stockItems={stockItems}
+                  savedProducts={activeProducts}
+                  overheads={overheads}
+                  onSaveMonth={handleSaveMonth}
+                  onUpdateMonth={handleUpdateMonth}
+                  onDeleteMonth={handleDeleteMonth}
+                  onRenameMonth={handleRenameMonth}
+                />
+                </div>
+              )}
+              {allowed && page === 'overheads' && (
+                <div>
+                <OverheadsPage overheads={overheads} onUpdateOverheads={handleUpdateOverheads} />
+                </div>
+              )}
+              {allowed && page === 'archive' && (
+                <div>
+                <ArchivePage
+                  savedProducts={savedProducts}
+                  liveProducts={liveProducts}
+                  stockItems={stockItems}
+                  settings={settings}
+                  onRunSweep={handleRunSweep}
+                  onRestore={handleRestoreArchived}
+                />
+                </div>
+              )}
+              {allowed && page === 'settings' && (
+                <div>
+                <SettingsPage
+                  settings={settings}
+                  onUpdateSettings={handleUpdateSettings}
+                  me={me}
+                  profiles={profiles}
+                  onSaveProfile={handleSaveProfile}
+                  onLoadActivity={loadActivity}
+                  onNavigate={navigateTo}
+                />
+                </div>
+              )}
+            </Suspense>
+          )}
+        </div>
+        {/* Bottom tabs (phones): the warehouse's everyday pages a thumb away; the full menu is the last tab */}
+        {tabBar.length > 0 && (
+          <nav aria-label="Quick menu" className="lg:hidden fixed bottom-0 inset-x-0 z-20 bg-white/95 backdrop-blur border-t border-rule pb-[env(safe-area-inset-bottom)]">
+            <div className="flex">
+              {tabBar.map(item => {
+                const on = page === item.id
+                const n = navCountFor(item.id)
+                return (
+                  <button key={item.id} onClick={() => navigateTo(item.id)} aria-current={on ? 'page' : undefined}
+                    className={`relative flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 h-14 text-[10.5px] font-medium ${on ? 'text-royal-600' : 'text-ink/55'}`}>
+                    <Icon name={item.icon} size={21} />
+                    <span className="truncate max-w-full px-1">{TAB_LABEL[item.id] || item.label}</span>
+                    {n > 0 && <span className="absolute top-1.5 left-1/2 ml-2 min-w-[17px] h-[17px] px-1 rounded-full bg-coral text-white text-[10px] leading-[17px] text-center tabular-nums">{n > 99 ? '99+' : n}</span>}
+                    {on && <span className="absolute top-0 inset-x-4 h-0.5 rounded-full bg-royal-500" />}
+                  </button>
+                )
+              })}
+              <button onClick={() => setSidebarOpen(true)} aria-expanded={sidebarOpen}
+                className="flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 h-14 text-[10.5px] font-medium text-ink/55">
+                <Icon name="menu" size={21} />
+                <span>Menu</span>
+              </button>
+            </div>
+          </nav>
+        )}
+      </main>
+
+      {commandOpen && (
+        <div className="fixed inset-0 z-[60] bg-ink/30 backdrop-blur-[2px] flex items-start justify-center px-3 sm:px-4 pt-3 sm:pt-[9vh]" onMouseDown={e => e.target === e.currentTarget && setCommandOpen(false)}>
+          <div className="w-full max-w-xl bg-white border border-rule rounded-[7px] shadow-modal overflow-hidden" role="dialog" aria-modal="true" aria-label="Search">
+            <div className="relative border-b border-rule">
+              <Icon name="search" size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/35" />
+              <input
+                autoFocus
+                value={commandQuery}
+                onChange={e => setCommandQuery(e.target.value)}
+                placeholder="Search pages, listings, ASINs, products…"
+                enterKeyHint="go" autoComplete="off" autoCorrect="off" spellCheck={false} aria-label="Search"
+                className="w-full bg-white pl-11 pr-12 py-4 text-sm text-ink outline-none placeholder:text-ink/30"
+                onKeyDown={e => {
+                  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault()
+                    const n = visibleCommands.length
+                    if (n) setCommandIndex(i => (i + (e.key === 'ArrowDown' ? 1 : n - 1)) % n)
+                  }
+                  const chosen = visibleCommands[commandIndex] || visibleCommands[0]
+                  if (e.key === 'Enter' && chosen) {
+                    chosen.action(); setCommandOpen(false); setCommandQuery('')
+                  }
+                }}
+              />
+              <span className="command-kbd absolute right-4 top-1/2 -translate-y-1/2 hidden [@media(pointer:fine)]:inline">ESC</span>
+              <button className="icon-btn absolute right-2 top-1/2 -translate-y-1/2 [@media(pointer:fine)]:hidden" aria-label="Close search"
+                onClick={() => setCommandOpen(false)}><Icon name="close" size={18} /></button>
+            </div>
+            <div className="max-h-[min(420px,60dvh)] overflow-y-auto overscroll-contain p-2">
+              {visibleCommands.length ? visibleCommands.map((item, i) => (
+                <button
+                  key={item.key}
+                  ref={i === commandIndex ? (el => el?.scrollIntoView({ block: 'nearest' })) : undefined}
+                  onMouseMove={() => i !== commandIndex && setCommandIndex(i)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-[5px] text-left hover:bg-sky/40 transition-colors ${i === commandIndex ? 'bg-sky/40' : ''}`}
+                  onClick={() => { item.action(); setCommandOpen(false); setCommandQuery('') }}
+                >
+                  <div className="w-8 h-8 rounded-[5px] bg-paper border border-rule flex items-center justify-center text-ink/55 flex-shrink-0">
+                    <Icon name={item.icon} size={15} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium text-ink truncate">{item.label}</div>
+                    <div className="text-[11px] text-ink/40 truncate">{item.type}{item.hint ? ` · ${item.hint}` : ''}</div>
+                  </div>
+                  <Icon name="arrowRight" size={14} className="text-ink/25" />
+                </button>
+              )) : (
+                <div className="px-4 py-10 text-center text-sm text-ink/45">No matching pages or records.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Suspense fallback={null}>
+      {openPo && purchaseOrders.find(o => o.id === openPo) && (
+        <PurchaseOrderDrawer
+          po={purchaseOrders.find(o => o.id === openPo)}
+          issues={purchaseIssues.filter(i => i.po_id === openPo)}
+          orders={purchaseOrders}
+          onLoadActivity={loadActivity}
+          me={me}
+          canPay={canAccess(me, 'payments')}
+          onClose={() => setOpenPo(null)}
+          onEdit={(po) => { setOpenPo(null); setPoDraft(po) }}
+          onReceive={handleReceive}
+          onMarkPaid={handleMarkPaid}
+          onUploadDoc={handlePoDoc}
+          onViewDoc={handleViewDoc}
+          onRaiseIssue={handleRaiseIssue}
+          onUpdateIssue={handleUpdateIssue}
+          onComplete={handleCompletePo}
+          onCancel={handleCancelPo}
+          onRepeat={handleRepeatPo}
+          onRaiseCredit={handleRaiseCredit}
+          supplier={(() => { const o = purchaseOrders.find(x => x.id === openPo); return suppliers.find(x => x.id === o?.supplier_id) || (o?.supplier_name ? supplierForName(o.supplier_name, suppliers) : null) })()}
+          stockItems={stockItems}
+          onConfirmDelivery={handleConfirmDelivery}
+          onLineStatus={handleLineStatus}
+          onLinkLine={handleLinkPoLine}
+          onCreateProduct={handleAddStockItem}
+          requests={stockRequests}
+          onOpenRequest={(id) => { setOpenPo(null); navigateTo('requests', id) }}
+          deliveries={goodsIn.deliveries.filter(d => d.po_id === openPo)}
+          onOpenDelivery={(id) => { setOpenPo(null); navigateTo('goods-in', id) }}
+          onViewDeliveryPhoto={handleViewGoodsInPhoto}
+        />
+      )}
+      {addingCompany && (
+        <AddCompany scope={addingCompany} onClose={() => setAddingCompany(null)}
+          onSave={async (payee, kind) => { const row = await handleCreatePayee(payee, kind); if (row) { setAddingCompany(null); navigateTo(addingCompany, row.id) } }} />
+      )}
+      {attachingDocs && (
+        <AttachDocuments orders={purchaseOrders} onClose={() => { setAttachingDocs(false); refreshPurchases() }}
+          onAttach={async (po, file) => {
+            const path = await uploadPurchaseDoc(file, po.po_number, 'invoice')
+            await updatePurchaseOrder(po.id, { invoice_path: path, data: { ...(po.data || {}), documentOnFile: true } })
+            log({ entity_type: 'purchase', entity_id: po.id, entity_name: po.po_number, action: 'Invoice uploaded',
+              detail: file.name, source: 'bulk attach' })
+          }} />
+      )}
+      {poDraft && (
+        <PoBuilder
+          po={poDraft}
+          suppliers={suppliers}
+          stockItems={stockItems}
+          me={me}
+          onClose={() => setPoDraft(null)}
+          onSave={(po, items) => handleSavePo(po, items)}
+          onSend={(po, items) => handleSavePo(po, items, { send: true })}
+          onCreateProduct={handleAddStockItem}
+          onUploadDoc={async (file, kind) => uploadPurchaseDoc(file, poDraft.po_number, kind)}
+          onCreatePayee={handleCreatePayee}
+        />
+      )}
+      {session && canAccess(me, 'dispatch') && page !== 'dispatch' && (
+        <DispatchJobsPill onOpen={() => navigateTo('dispatch')} showToast={showToast} />
+      )}
+      </Suspense>
+      {update && (
+        <div className="fixed bottom-[calc(4.25rem+env(safe-area-inset-bottom))] lg:bottom-5 left-3 right-3 sm:left-auto sm:right-5 z-50 sm:max-w-md px-4 py-3 rounded-[6px] bg-royal-600 text-white shadow-modal flex items-center gap-3" role="status">
+          <Icon name="sparkles" size={18} className="shrink-0" />
+          <span className="flex-1 min-w-0 text-sm leading-snug"><b>New version ready</b>{update.version ? ` (v${update.version})` : ''}. Update to get the latest changes.</span>
+          <button className="shrink-0 px-3 py-2 rounded-[5px] bg-white text-royal-700 text-sm font-semibold"
+            onClick={() => { if (!busy() || window.confirm('Something is still in progress here (a file being read or a form open). Update anyway?')) applyUpdate() }}>
+            Update
+          </button>
+        </div>
+      )}
+      {skuAsk && (
+        <Suspense fallback={null}>
+          <SkuPrompt items={skuAsk.items} listingName={skuAsk.listingName} stockItems={stockItems} me={me}
+            onCancel={() => { skuAsk.resolve(false); setSkuAsk(null) }} onDone={() => { skuAsk.resolve(true); setSkuAsk(null) }} />
+        </Suspense>
+      )}
+      {session && me && <UndoPill ping={undoPing} lifted={tabBar.length > 0} railHidden={railHidden} onOpen={() => setUndoOpen(true)} />}
+      {undoOpen && <UndoPanel showToast={showToast} onClose={() => setUndoOpen(false)}
+        onUndone={() => { setUndoOpen(false); setTimeout(() => window.location.reload(), 600) }} />}
+      {toast && (
+        <div className={`fixed ${update ? 'bottom-[calc(9.5rem+env(safe-area-inset-bottom))] lg:bottom-24' : 'bottom-[calc(4.25rem+env(safe-area-inset-bottom))] lg:bottom-5'} left-3 right-3 sm:left-auto sm:right-5 z-50 px-4 py-3 rounded-[5px] text-sm font-medium shadow-modal sm:max-w-md flex items-center justify-between gap-4
+          ${toast.type === 'error' ? 'bg-loss text-white' : 'bg-ink text-white'}`} role={toast.type === 'error' ? 'alert' : 'status'}>
+          <span>{toast.msg}</span>
+          {toast.action && (
+            <button className="flex-shrink-0 font-semibold underline underline-offset-2 hover:no-underline"
+              onClick={() => { setToast(null); toast.action.run() }}>{toast.action.label}</button>
+          )}
+        </div>
+      )}
+    </div>
+    </LinksProvider>
+  )
+}
