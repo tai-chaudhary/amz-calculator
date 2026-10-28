@@ -1,0 +1,192 @@
+import React, { useState, useEffect } from 'react'
+import { PageHeader, Icon, StatusBadge, SegmentedControl, EmptyState, Modal, CoverFlag } from './UI'
+import { StockChange, WhoSelect, useWho, CountShelf } from './InventoryParts'
+import { fmtUnits, needsPickShelf, stockState } from '../lib/inventory'
+import { invDismissTask, loadCodesToVerify } from '../lib/db'
+import { CodesToVerify } from './VerifyCode'
+import { asCode } from './ItemCodes'
+import { canDo, canApproveProducts } from '../lib/access'
+
+const when = (d) => (d ? new Date(d).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '')
+
+/**
+ * Jobs the stock raises for the warehouse: a pick shelf running low with
+ * more in overflow. They appear on their own as orders go out, and clear
+ * themselves if the shelf gets topped up some other way.
+ */
+export default function WarehouseTasksPage({ me, inventory, people = [], office = false, focusId, showToast, onRefresh, onNavigate }) {
+  const [view, setView] = useState('open')
+  const [doing, setDoing] = useState(null)
+  const [skipping, setSkipping] = useState(null)
+  const [counting, setCounting] = useState(null)
+  // Codes on open orders nobody has verified: for the people who can verify them
+  const [codes, setCodes] = useState([])
+  const linker = canDo(me, 'link-codes')
+  const loadCodes = () => { if (linker) loadCodesToVerify().then(r => setCodes((r || []).map(asCode))).catch(() => {}) }
+  useEffect(() => { loadCodes() }, [linker]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    onRefresh?.()
+    const t = setInterval(() => onRefresh?.(), 60000)
+    return () => clearInterval(t)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const tasks = inventory?.tasks || []
+  const products = inventory?.products || []
+  const toApprove = canApproveProducts(me) ? products.filter(p => p.status === 'pending') : []
+  const open = tasks.filter(t => t.status === 'open')
+    .sort((a, b) => (a.kind === 'count') - (b.kind === 'count') || String(a.from_location).localeCompare(String(b.from_location), 'en', { numeric: true }))
+  const done = tasks.filter(t => t.status !== 'open')
+  const shown = view === 'open' ? open : done
+  const doingProduct = doing && products.find(p => p.id === doing.product_id)
+  // Top-up tasks need a pick shelf to fill, so anything selling without one is listed on its own
+  const noPick = products.filter(needsPickShelf)
+    .sort((a, b) => (b.open_orders - a.open_orders) || (b.daily - a.daily) || a.name.localeCompare(b.name))
+
+  return (
+    <div>
+      <PageHeader eyebrow="Warehouse / tasks" title="Tasks"
+        description="Pick shelves to top up, and today’s shelves to count. Raised automatically." />
+      {(inventory?.meta?.counts_30 > 0) && (
+        <div className="text-xs text-ink/60 mb-3">
+          Counts in the last 30 days: <b>{inventory.meta.counts_30}</b> shelves, <b>{Math.round((inventory.meta.counts_right_30 / inventory.meta.counts_30) * 100)}%</b> exactly right.
+        </div>
+      )}
+      <div className="overflow-x-auto max-w-full -mx-1 px-1 mb-4">
+        <SegmentedControl label="Show" value={view} onChange={setView}
+          items={[{ id: 'open', label: 'To do', count: open.length }, { id: 'done', label: 'Done lately', count: done.length }]} />
+      </div>
+
+      {view === 'open' && codes.length > 0 && (
+        <div className="panel-alert mb-3">
+          <div className="title-case text-sm font-semibold text-ink">Item codes to verify ({codes.length})</div>
+          <div className="text-xs text-ink/55 mt-0.5 mb-2">On open orders, not one of our SKUs, and nobody has said what they are. Their orders wait in On hold until they're verified.</div>
+          <CodesToVerify codes={codes} me={me} showToast={showToast} onVerified={loadCodes} />
+        </div>
+      )}
+
+      {view === 'open' && toApprove.length > 0 && (
+        <div className="panel-alert mb-3">
+          <div className="title-case text-sm font-semibold text-ink">New products to approve ({toApprove.length})</div>
+          <div className="text-xs text-ink/55 mt-0.5 mb-2">Added at Goods In. Check the name, give each its SKU — item codes can't be linked to them until then.</div>
+          <div className="divide-y divide-rule/70">
+            {toApprove.map(p => (
+              <button key={p.id} className="w-full flex items-center justify-between gap-3 py-2.5 text-left hover:bg-paper/70"
+                onClick={() => onNavigate?.('inventory', p.id)}>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-ink leading-snug">{p.name}</span>
+                  <span className="block text-xs text-ink/50">
+                    <span className="font-mono">{p.code}</span>{p.requested_by ? ` · added by ${p.requested_by}` : ''} · {fmtUnits(p.on_hand)} on shelves
+                  </span>
+                </span>
+                <Icon name="arrowRight" size={14} className="text-ink/30 shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {view === 'open' && noPick.length > 0 && (
+        <div className="panel-notice mb-3">
+          <div className="title-case text-sm font-semibold text-ink">Selling, but no pick shelf ({noPick.length})</div>
+          <div className="text-xs text-ink/55 mt-0.5 mb-2">All the stock is in overflow, so these never get a top-up task. Give each one a pick shelf.</div>
+          <div className="divide-y divide-rule/70">
+            {noPick.map(p => (
+              <button key={p.id} className="w-full flex items-center justify-between gap-3 py-2.5 text-left hover:bg-paper/70"
+                onClick={() => onNavigate?.('inventory', p.id)}>
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-ink leading-snug">{p.name}</span>
+                  <span className="block text-xs text-ink/50 tabular-nums">
+                    {fmtUnits(p.on_hand)} in {(p.locations || []).map(l => l.code).join(', ') || 'no shelf'}
+                    {p.open_orders > 0 ? ` · ${fmtUnits(p.open_orders)} on open orders` : ''}
+                  </span>
+                </span>
+                <Icon name="arrowRight" size={14} className="text-ink/30 shrink-0" />
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {shown.length === 0 ? (
+        <EmptyState icon="check" title={view === 'open' ? 'Nothing to top up' : 'Nothing done in the last few days'}
+          sub={view === 'open' ? 'When a pick shelf gets low and there’s more in overflow, it shows here.' : ''} />
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5">
+          {shown.map(t => (
+            <div key={t.id} className={`card p-0 overflow-hidden ${focusId === t.id ? 'ring-2 ring-royal-300' : ''}`}>
+              <div className="px-4 py-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs text-ink/45 tabular-nums">{t.ref} · {when(t.created_at)}</div>
+                    {t.kind === 'count'
+                      ? <div className="font-semibold text-ink leading-snug">Count shelf {t.from_location}</div>
+                      : <button className="font-semibold text-ink leading-snug text-left hover:underline" onClick={() => onNavigate?.('inventory', t.product_id)}>{t.product_name}</button>}
+                  </div>
+                  {t.status === 'done' ? <StatusBadge tone="live">Done</StatusBadge>
+                    : t.status === 'cleared' ? <StatusBadge tone="quiet">Topped up</StatusBadge>
+                    : t.status === 'dismissed' ? <StatusBadge tone="quiet">Not needed</StatusBadge>
+                    : <StatusBadge tone="warn">To do</StatusBadge>}
+                </div>
+                {t.kind === 'count' ? (
+                  <div className="text-xs text-ink/55 mt-1">{t.why}{t.status === 'done' ? ` · ${t.result?.diffs ? `${t.result.diffs} of ${t.result.lines} put right` : 'all correct'} · counted by ${t.done_by}` : ''}{t.note ? ` · ${t.note}` : ''}</div>
+                ) : (<>
+                <div className="mt-2 flex items-center gap-2 text-sm">
+                  <span className="text-xl font-semibold tabular-nums">{fmtUnits(t.status === 'done' ? t.moved : t.qty)}</span>
+                  <span className="text-ink/60">from</span>
+                  <b className="tabular-nums">{t.from_location}</b>
+                  <span className="text-ink/60">to</span>
+                  <b className="tabular-nums">{t.to_location || 'a pick shelf'}</b>
+                </div>
+                <div className="text-xs text-ink/55 mt-1">{t.why}{t.done_by ? ` · ${t.status === 'done' ? 'moved' : 'closed'} by ${t.done_by}` : ''}{t.note ? ` · ${t.note}` : ''}</div>
+                {t.status === 'open' && (() => { const pr = products.find(x => x.id === t.product_id); return pr ? <div className="mt-1.5"><CoverFlag st={stockState(pr)} prefix="Stock lasts" /></div> : null })()}
+                </>)}
+              </div>
+              {t.status === 'open' && (
+                <div className="px-4 pb-3 grid grid-cols-3 gap-2">
+                  <button className="btn btn-primary col-span-2 justify-center py-3 sm:py-2" onClick={() => (t.kind === 'count' ? setCounting(t) : setDoing(t))}>
+                    <Icon name="check" size={15} /> {t.kind === 'count' ? 'Count it' : 'Done it'}
+                  </button>
+                  <button className="btn btn-secondary justify-center py-3 sm:py-2" onClick={() => setSkipping(t)}>Not needed</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {doing && doingProduct && (
+        <StockChange mode="move" task={doing} product={doingProduct} from={doing.from_location} to={doing.to_location || ''}
+          products={products} locations={inventory?.locations || []} people={people} me={me} office={office} showToast={showToast}
+          onClose={() => setDoing(null)} onDone={() => { setDoing(null); onRefresh?.() }} />
+      )}
+      {counting && (
+        <CountShelf location={counting.from_location} task={counting} products={products} people={people} me={me} office={office} showToast={showToast}
+          onClose={() => setCounting(null)} onDone={() => { setCounting(null); onRefresh?.() }} />
+      )}
+      {skipping && (
+        <Skip task={skipping} me={me} people={people} office={office} showToast={showToast}
+          onClose={() => setSkipping(null)} onDone={() => { setSkipping(null); onRefresh?.() }} />
+      )}
+    </div>
+  )
+}
+
+function Skip({ task, me, people, office, showToast, onClose, onDone }) {
+  const [why, setWhy] = useState('')
+  const [who, setWho] = useWho(me, people, office)
+  const [busy, setBusy] = useState(false)
+  return (
+    <Modal title={`${task.ref} isn’t needed`} description={task.kind === 'count' ? `Count ${task.from_location}` : task.product_name} onClose={onClose}>
+      <div className="space-y-3">
+        <div><label className="label" htmlFor="skip-why">Why?</label>
+          <input id="skip-why" className="input text-base sm:text-sm" value={why} onChange={e => setWhy(e.target.value)} placeholder="e.g. overflow is empty, the shelf was already full" autoFocus /></div>
+        <div className="text-xs text-ink/50">If the numbers are wrong, count the shelves in Inventory so it doesn’t ask again.</div>
+        <WhoSelect people={people} value={who} onChange={setWho} office={office} me={me} />
+        <button className="btn btn-primary w-full justify-center py-3 sm:py-2" disabled={!why.trim() || !who || busy}
+          onClick={async () => { setBusy(true); try { await invDismissTask(task.id, why, who); onDone() } catch (e) { showToast?.(e.message, 'error'); setBusy(false) } }}>
+          Close the task
+        </button>
+      </div>
+    </Modal>
+  )
+}
