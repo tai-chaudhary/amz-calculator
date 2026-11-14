@@ -1,0 +1,35 @@
+-- ALREADY APPLIED to the live database on 13-11-2026. A summary: the function bodies are live in the database
+-- (read any of them with: select pg_get_functiondef('public.bulk_order_save(jsonb)'::regprocedure)).
+--
+-- 095: bulk orders — three kinds of order that leave on a pallet.
+--   stone   Stone & Surfaces: drop-ship. They collect (GForce); we charge per bundle of bags from their price list
+--           (wholesale_prices) and pay no delivery. Profit = price − product cost.
+--   bulk    An Amazon / eBay / TikTok order sent by Farrall's pallet with ONE parcel by DHL / Evri for the tracking
+--           number. Linked by the CHANNEL order number (ref_key = the number with only letters and digits).
+--   salt4u  A Salt 4 U website order: all of it on the pallet.
+--
+-- Tables
+--   wholesale_prices (account, valid_from, bag_kg, salt white|brown, bags, price) — read by people who see costs.
+--     Loaded: Stone & Surfaces, valid from 01-10-2026, 47 bundles × white and brown (94 prices).
+--   bulk_orders (kind, account, channel_ref, ref_key, channel, helm_order_id, customer, postcode, code, product, units,
+--     unit_kg, parcel_units, parcel_carrier, pallet_units, pallets, pallet_size, pallet_carrier, service, band, ssd,
+--     status to_arrange|arranged|cancelled, source form|upload|backfill, …) — read by any active user; written only
+--     through the functions below. One live order per channel order (bulk / salt4u) and per SSD number (stone).
+--     Trigger bulk_orders_fill: ref_key from channel_ref; unit_kg from the product's name when the product has no weight.
+--   bulk_order_money (order_id, revenue, revenue_source, product_cost, pallet_base, fuel_pct, fuel, parcel_shipping,
+--     packaging, shipping_total, parcels_alt, saving, notes) — its own table so RLS only shows it to sees_costs().
+--
+-- Functions
+--   ref_key(text), my_name()
+--   bulk_order_cost(uuid)            internal — (re)works an order's money: price list for stone; pallet_cost() +
+--                                    the one parcel + its packaging for bulk / salt4u; what parcels would have cost.
+--   bulk_order_json(uuid)            internal — the order, with money only for sees_costs().
+--   bulk_order_lookup(ref)           HELM's order, any parcel label already in Dispatch, any bulk order already made.
+--   bulk_order_save(jsonb)           all three kinds; updates the live order for the same channel order / SSD.
+--   bulk_upload_check(jsonb)         at label upload: which orders are bulk orders and the parcel's share. An order
+--                                    with ONE label for more than a 25kg box holds, and 100kg or more left over, is
+--                                    taken as a bulk order: status to_arrange ("Pallets to arrange"), never held.
+--   bulk_order_cancel(uuid, reason)
+--   bulk_orders_list(days)           the Wholesale tab, with each order's pallet and parcel labels.
+-- Backfill: the four GForce orders already sent were added as kind 'stone' (source 'backfill').
+select 1;

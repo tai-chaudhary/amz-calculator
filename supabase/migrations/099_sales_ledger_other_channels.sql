@@ -1,0 +1,9 @@
+-- ALREADY APPLIED to the live database on 14-11-2026. A summary: the function and view bodies are live in the database.
+--
+-- 099: eBay and TikTok reports in the sales ledger.
+-- sales_import_report(p_source, p_rows, p_by)  admin import of 'ebay_report' / 'tiktok_report' lines into sales_lines
+--                                              (key per line, so re-importing adds nothing twice); logs to activity_log.
+-- sales_lines.source                           check widened to amazon_report, helm, ebay_report, tiktok_report.
+-- sales_ledger (view)                          a report line now replaces HELM's line for the same channel + order ref on
+--                                              every channel (was Amazon only). fees: Amazon and eBay report fees / 1.2
+--                                              (they include VAT); TikTok report fees as charged; HELM as estimated.

@@ -1,0 +1,5 @@
+-- 090 (10-11-2026, already applied): stock on order counted in UNITS, not packs. A PO line bought by the case
+-- (64 cases × 4) is 256 units on order — what Goods In puts away. inv_overview's "onorder" and the Launch board's
+-- outstanding/received now multiply by the line's packUnits. Patched in place with replace() on the function text.
+-- Also: PO lines read from a document had their expected price ("systemCost") saved per unit while the line is
+-- priced per pack; those were corrected to per pack (8 lines), and the portal now saves it per pack (v2.74.3).

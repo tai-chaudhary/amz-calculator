@@ -1,0 +1,52 @@
+Tax Invoice
+
+
+Bill to                      Ship to
+                                                                                             JD Catering Equipment Solutions
+Adrian Marsh                 Adrian Marsh
+                                                                                                                         Ltd
+Stoke Manor                  Stoke Manor
+                                                                                                           Ambassador Way
+Stoke On Tern                Stoke On Tern
+                                                                                                        Yaxham Road Ind Est
+Market Drayton               Market Drayton
+                                                                                                                  DEREHAM
+Shropshire                   Shropshire
+                                                                                                                   Dereham
+TF9 2DU                      TF9 2DU
+                                                                                                                    Norfolk
+operations@adrianmarshltd.co.uk                                                                                   NR20 3TL
+                                                                                                               01953 851339
+                                                                                             accounts@jdcateringequip.co.uk
+                                                                                                             CRN: 5709349
+                                                                                                            VAT: 719982777
+                                                                                             accounts@jdcateringequip.co.uk
+                                                                                                          +44 01953851339
+
+Amount due        Due date                Issue date           Invoice number
+£871.33           15 Oct 2026             15 Sept 2026         INV-13822
+
+View and pay online
+
+ Description                                                              Quantity         Price            Tax      Amount
+ Pyrex Measuring Jug 1Ltr                                                       161         4.51          20%          726.11
+
+                                                                                            Subtotal                   726.11
+                                                                                            Total VAT 20%             145.22
+
+                  View and pay online                                                       Total                     871.33
+
+                                                                                            Amount due            £871.33
+
+Payment preferred by BACS
+Account no 51479970
+Sort code 40-20-08
+IBAN GB41HBUK40200851479970
+BIC/SWIFT HBUKGB4128U
+Full Terms and Conditions to the sale of goods on this invoice are available online at www.jdcateringequip.co.uk It is advised
+that these are viewed before any payment is made to JD Catering Equipment Solutions Ltd. Once full payment has been made
+it will be assumed the Terms and Conditions have been accepted.
+Administrative cost for late payment of 15% of the value of the invoice will be added if terms not adhered to.
+Anglia Catering Equipment Repairs (ACER), Anglia Refrigeration and Air Conditioning (ARAC) and Kamado UK is a trading name
+for the Registered Name of JD Catering Equipment Solutions Ltd
+

@@ -1,0 +1,20 @@
+-- ALREADY APPLIED to the live database on 14-11-2026. A summary: the function bodies are live in the database.
+--
+-- 096: open orders checked for a pallet before any label; bulk orders in the P&L.
+-- helm_orders.postcode            the delivery postcode of each HELM order. The owner agreed (13-11-2026): postcode only —
+--                                 names, addresses, phones and emails are still dropped by helm-sync (v10).
+-- helm_orders_set_postcodes(jsonb) internal — helm-sync saves postcodes in one go, only where changed.
+-- units_per_box(kg)               how many of a heavy item go in one parcel under 25kg (10kg → 2, 12.5kg → 2, 15kg+ → 1; light items 1).
+-- parcel_pack_cost(stock_item, n) internal — the packaging a parcel of n of a product goes in, from its own listing.
+-- bulk_ship_options(...)          "all parcels" is now costed by the box (units_per_box), not one unit a parcel.
+-- bulk_order_cost(uuid)           the same for "what parcels would have cost" on a bulk order.
+-- bulk_check_open()               open orders (no label yet) of one product and 100kg or more: parcels or pallet, and the
+--                                 saving for people who see costs. Shown in Dispatch and on the Wholesale tab.
+-- bulk_order_lookup(ref)          also returns HELM's postcode; counts GForce pallet labels as pallet labels.
+-- bulk_orders_list(days)          a bulk order's pallet labels may be GForce ones (matched by its SSD number).
+-- report_pl_lines(from, to, ch)   adds "bulk": { order_ref: { shipping, packaging, known } } for arranged bulk orders, and
+--                                 Stone & Surfaces orders as lines of the "Wholesale" channel (price-list price, product
+--                                 cost with the line, no delivery) on the day their pallet was collected. Both only for
+--                                 people who see costs.
+-- Data: order 206-4547069-2001937 refiled from Stone & Surfaces to a bulk order sent by Farrall's 24hr (logged).
+select 1;

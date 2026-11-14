@@ -1,0 +1,11 @@
+-- 088 + 089: the Launch board and its ClickUp message (10-11-2026). Already applied.
+-- listing_launch_board(): every approved listing that isn't live yet, with its stage worked out from stock on hand,
+-- purchase orders and Goods In — never set by hand:
+--   ready       every product has enough stock on hand for at least one listing unit (any stock at all)
+--   arriving    not ready, and a delivery for a missing product has started coming in (part received)
+--   ordered     not ready, and every missing product is on a sent purchase order
+--   needs_order not ready, and something missing isn't ordered (a draft PO doesn't count as ordered)
+-- notify_launch_stock_in (trigger on purchase_order_items.qty_received): when Goods In books in stock that an approved,
+-- not-live listing needs, queue 'launch_stock_in' for "Portal Updates" — never allowed to block a booking.
+-- Full definitions are in the database (see the Supabase migrations "listing_launch_board" and "launch_stock_in_notify").
+insert into notification_rules (event, channel_name) values ('launch_stock_in', 'Portal Updates') on conflict (event) do nothing;

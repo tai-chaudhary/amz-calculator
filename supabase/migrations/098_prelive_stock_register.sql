@@ -1,0 +1,6 @@
+-- ALREADY APPLIED to the live database on 14-11-2026. A summary: the table and its rows are live in the database.
+--
+-- 098: the pre-live stock register (stock and equipment brought into the partnership on 1 Aug 2026).
+-- prelive_stock   line_no, name, units, unit_cost, type ('Stock','Not live yet','Not for sale','Packaging','Equipment','Removed'),
+--                 product_name, stock_item_id, as_of (2026-08-01), note. 180 lines, £120,415.80, loaded from the owner's
+--                 file and matched to portal products with him in chat. Never call it anything but "Pre-live stock".

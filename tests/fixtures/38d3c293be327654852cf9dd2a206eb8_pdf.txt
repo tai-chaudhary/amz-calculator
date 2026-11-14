@@ -1,0 +1,41 @@
+                      KD Wholesale Cash & Carry
+
+                                               NOT A VAT INVOICE                                                                       SALES ORDER
+
+      Bill To                                                                    Ship To
+     ADRIAN MARSH LTD                                                          ADRIAN MARSH LTD
+     UNIT 1 STOKE MANOR FARM STOKE ON TERN                                     UNIT 1 STOKE MANOR FARM STOKE ON TERN
+     SHROPSHIRE                                                                SHROPSHIRE
+     TF9 2DU                                                                   TF9 2DU
+      UK                                                                        UK
+
+     email        operations@adrianmarshltd.co.uk                              Contact MR ALI IDREES
+                                                                               email
+
+
+
+    Order Number       Order Date         Payment Term        Currency         PO Number             Need By              Created By        Account ref.
+
+    19832              01/09/26                               GBP                                                         DEEP14            36252
+
+     Item                                                           Order      Picked     Balance      Unit                     VAT
+     Number              Item Name                                   Qty        Qty         Qty        Cost              NET   Rate      VAT           Total
+
+    KD10594           PYREX CLASSIC MIXING BOWL 500ML                    204                   204        2.15      438.60     20.00     87.72        526.32
+    99990             SHIPPING / DELIVERY CHARGES FOR                      1                     1       39.99       39.99     20.00      8.00         47.99
+                      PALLET DELIVERY
+
+                                                                                                                                   NET              478.59
+   Title of goods/services will remain with KD WHOLESALE CASH & CARRY LTD until payment is received in full.On
+                                                                                                                                   VAT               95.72
+   overdue accounts we reserve the right to charge interest at the rate of 12% over base rate of lending at Santander.
+   Unless Otherwise stated, KD WHOLESALE CASH & CARRY LTD standard terms and conditions apply.                                  GROSS               574.31
+   Please Remit BACS Payment to:Barclays Sort Code:20-35-93 Account Number:40896675
+   Please reference Account number on BACS payment and on all remittances.
+
+
+
+
+ UNIT 14 14 GREYCANE ROADUNIT 3 NORTH WATERFORD HERTS WD24 7GP TEL:01923 448 631
+Tuesday September 1 2026 11:27 AM                                                                                                                     1 of1
+

@@ -1,0 +1,11 @@
+-- 091–092 (10-11-2026, already applied): the sales ledger for the Reports module.
+--   sales_lines            every order line, refund, Amazon charge/credit and payout (kind sale/refund/charge/transfer),
+--                          from the Amazon transaction report (source amazon_report) or HELM (source helm). No customer data.
+--   sales_import_amazon()  admin import of report lines (key per line, so re-importing adds nothing twice)
+--   sales_refresh_helm()   HELM labelled orders → lines (order total shared by listing price; fee estimated from the
+--                          listing's refFee); cron 'sales-refresh-helm' every 15 minutes for the last 4 days
+--   sales_ledger (view)    report lines for every Amazon order the report holds, HELM lines otherwise; gross / VAT
+--                          (20% inside the price where no VAT is split out) / fees ex VAT; linked to the listing by
+--                          channel + Listing SKU
+--   report_sales()         grouped by day, month, channel, ASIN or Listing SKU for the Reports page
+-- Full definitions are in the database (Supabase migrations "sales_ledger" and "sales_ledger_view_and_report").
