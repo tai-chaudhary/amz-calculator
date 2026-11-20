@@ -1,0 +1,18 @@
+-- ALREADY APPLIED to the live database on 15-11-2026. A summary: read the live functions with
+--   select pg_get_functiondef('public.report_pl_lines(date,date,text)'::regprocedure)
+--
+-- 107: the P&L takes cost of goods sold from the costing (v2.83.0).
+--   report_pl_lines(from, to, channel) now also returns, for people who see costs:
+--     lines[].cogs_real   the order's real cost (cost_uses, kind 'sale', joined on order_ref) given to its sale lines:
+--                         a line gets the cost of its own products (listing components); cost for a product no line
+--                         names (a substitute was sent, or the line has no listing) is shared by sales value. Null
+--                         when the costing has nothing for the order yet — the browser then estimates from PO prices.
+--     cost_other          { replacements, returned, startup, losses_before, losses } for the dates (by the day the
+--                         stock left, UK time), All channels only. The owner's rules: replacements, and losses from
+--                         1 Dec 2026, are direct costs; returned to supplier, start-up differences and losses before
+--                         1 Dec are shown but are not in the P&L.
+--     costed_at           when the costing last ran.
+--   cost_refresh()        admins only: runs cost_rebuild() now. The portal calls it after a report upload.
+--   pg_cron job 'cost-rebuild-nightly' (30 2 * * *): select public.cost_rebuild().
+--   cost_rebuild() itself cannot be called from the browser.
+select 1;

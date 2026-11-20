@@ -1,0 +1,26 @@
+-- ALREADY APPLIED to the live database on 15-11-2026 (patched into cost_rebuild() in place). A summary: read the live
+-- function with  select pg_get_functiondef('public.cost_rebuild()'::regprocedure).
+--
+-- 106: costing — stock returned to a supplier, and prices for stock that arrived with no PO.
+-- Why: Scola Artmix 12 x 600ml. 300 packs came from ESPO at £15.35 and 275 went back (credit note 8222974, logged as
+-- CN-HI-20261105-001); 126 came from TTS at £14.99 and TTS agreed to take 125 back; everything else is Daler-Rowney
+-- stock (£9.98, or £8.98 by the pallet from the quote of 12-10-2026), most of it delivered with no PO. The owner:
+-- sales of this product must be costed at the Daler-Rowney price, never at the price of stock that went back.
+--
+-- Rules now in cost_rebuild():
+--   * A "returned to supplier" movement is matched to the order it came on: a credit note (purchase_orders.kind =
+--     'credit_note', credit_for = that order) worth the units returned × that order's price, within 5%.
+--   * Those units get their own layer from the day they arrived (source 'PO, later returned'). Sales, counts and losses
+--     never draw on it; the return takes it out at the price paid, so the return totals what the supplier credits.
+--   * cost_planned_returns (stock_item_id, po_number, units): a return that is agreed but has not gone back yet
+--     reserves its stock the same way. Once the real return movement and its credit note exist, they are used instead.
+--   * If a sale finds nothing else in stock, it uses the reserved stock but is costed at the price of what replaces it
+--     (the next delivery with a price, else the no-PO price). The difference is carried on the layer (owed) and comes
+--     back into the return when it happens. Until then it is reported in the run's stats as
+--     cost_awaiting_supplier_credit. Flag on the sale: "used stock that is going back to the supplier; costed at the
+--     price of its replacement".
+--   * cost_no_po_prices (stock_item_id, from_date, unit_cost): the price for stock of a product that arrived with no
+--     PO, from a date. It comes before "last known cost" and before the period average. Rows: Artmix 12 x 600ml
+--     £9.98 from 01-08-2026 and £8.98 from 12-10-2026.
+-- Both tables have RLS on and no policies (only the costing reads them). Every row is logged in activity_log.
+select 1;

@@ -1,0 +1,9 @@
+-- v2.92.0: the order audit shows everything about an order. order_audit (068-070) is left exactly as it is; this is a
+-- second, read-only request the page makes alongside it — order_audit_more(p_upload uuid, p_order_key text):
+--   stock         every stock movement for the order (this label's, and any other label's for the same order number)
+--   other_labels  the order's labels in other uploads: a second parcel, a pallet, a label bought elsewhere
+--   log           record corrections and anything else written against the order in the activity log
+--   bulk          its bulk (pallet) order, if any
+--   money, cost, bulk_money   for people who see costs only: the sale, refunds, the channel's fees, cashback and other
+--                 charges against the order (ex VAT), and the product cost charged, by product
+-- Needs can_open('order-audit'). About 0.1s. The body is in the database.

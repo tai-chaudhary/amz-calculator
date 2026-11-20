@@ -1,0 +1,13 @@
+-- 113 (v2.89.0, 16-11-2026): what is in an Amazon Buy Shipping order, for Dispatch. READ-ONLY — no table changes.
+--
+-- A label bought in Seller Central comes with Amazon's own packing slip, a picture the portal now reads: the order
+-- number and, for each line, the quantity, the listing SKU and the ASIN. Given those, this says what the parcel holds:
+--   helm     HELM's own record of that order (which also proves the order number was read right)
+--   listing  else the portal's listing for each line — found by ASIN (0 and O read alike), the listing SKU only to
+--            tell apart listings that share an ASIN but hold different products — its products x the quantity
+--            ordered. Every line must resolve to exactly one set of products, each with an inventory product.
+-- p = [{ ref, lines: [{ asin, sku, qty }] }]
+-- → { "<ref>": { helm: { items: [{code,name,qty}], prime } | null, listing: { items, lines: [{ listing, asin, qty }] } | null } }
+--
+-- The function body is as applied to the database on 16 Nov 2026 (apply_migration "113_dispatch_amazon_orders").
+-- Run `select pg_get_functiondef('public.dispatch_amazon_orders(jsonb)'::regprocedure)` for the exact text.

@@ -1,0 +1,18 @@
+-- v2.91.0: Finance -> Checks, first version. report_checks(p_from) — read-only, admins only, about a second to run.
+-- Ten checks, each "how many, and which" (up to 300 rows each):
+--   Orders             units          more or fewer units left the shelves than the order's listings say
+--                      swap           a different product went out than the listing names (by swap, with how many
+--                                     were recorded as substitutes)
+--                      nolabel        sold, but no label for the order in HELM or in Dispatch (from 19 Oct)
+--                      loose          dispatched labels with no order number ("manual" / "other")
+--                      nocost         sales more than three days old with no product cost
+--   Costs              paid           products charged more than 10% away from their portal cost, with what the stock cost
+--                      jump           product costs that doubled or halved in the last 120 days (from the activity log)
+--                      zero           products with no cost that have stock or sales
+--   Listings and fees  nolisting      sales not linked to a listing, by channel
+--                      nofee          sales with no fee at all
+-- NOT in this version: the pound-for-pound comparison of each order with its listing's cost in force on the day
+-- (tolerance 5p or 1%). The listing cost log (cost_history) only records some changes and no product cost history is
+-- kept by date, so that check needs a dated product cost record first. The units and swap checks catch every kind of
+-- error found in the deep dive of 15-16 Nov; the price side is covered product by product ("paid", "jump").
+-- The body is in the database (create or replace function public.report_checks(date)); see the migration history.

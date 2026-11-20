@@ -1,0 +1,13 @@
+-- ALREADY APPLIED to the live database on 14-11-2026. A summary: the function body is live —
+--   select pg_get_functiondef('public.cost_rebuild()'::regprocedure)
+-- 101: the costing engine. cost_rebuild() rebuilds from live data, from scratch, every time:
+--   cost_layers  stock in: one layer per arrival (pre-live stock on 1 Aug, supplier invoices, POs received before the
+--                17 Oct count, Goods In deliveries, found stock, count gains…) with units, unit cost and units left
+--   cost_uses    stock out, first in first out, with its cost: sale, replacement, returned to supplier, start-up
+--                difference, removed, damage, stock loss (counts from 1 Dec), split into singles
+--   cost_runs    the stats of each run
+-- Rules (the owner's): PO line price is the cost (data.paidUnitCost when the order had a discount); the 17 Oct count
+-- wins — missing units are start-up differences, extra units are costed as "in stock at the count, no PO"; stock that
+-- arrived with no PO uses the price paid for the product in the period, else its first later PO, else the pre-live
+-- price, else the portal cost. See 106 and 108 for what was added on 15 Nov.
+select 1;

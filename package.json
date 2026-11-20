@@ -1,0 +1,32 @@
+{
+  "name": "amz-calculator",
+  "private": true,
+  "version": "2.111.3",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/calc.test.mjs tests/access.test.mjs tests/salesImport.test.mjs tests/overheads.test.mjs tests/pnlScreen.test.mjs tests/dispatchPrime.test.mjs tests/feeSchedule.test.mjs tests/pnlShip.test.mjs tests/noSlip.test.mjs tests/commandSearch.test.mjs tests/dispatchTiles.test.mjs tests/dispatchPremium.test.mjs tests/fulfilmentShare.test.mjs tests/listingCodes.test.mjs tests/channelFees.test.mjs tests/productPackaging.test.mjs tests/channels.test.mjs tests/compare.test.mjs tests/careReplacements.test.mjs tests/surcharges.test.mjs tests/offshore.test.mjs tests/returns.test.mjs",
+    "check": "node scripts/check-order.cjs src/App.jsx && node scripts/check-hooks.cjs && node scripts/check-components.cjs src/components && node scripts/check-props.cjs && npm test"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.43.4",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
+    "jsdom": "^30.1.2",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "^4.7.76",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tesseract.js": "5.1.1",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.4",
+    "vite": "^5.3.1"
+  }
+}

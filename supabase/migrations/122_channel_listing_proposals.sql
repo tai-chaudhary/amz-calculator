@@ -1,0 +1,8 @@
+-- v2.92.0: report_channel_listing_proposals() — a PROPOSAL only; nothing is created or changed. Admins only. ~1.2s.
+-- For every eBay and TikTok item that has sold: the products and quantities its code is linked to (inv_channel_skus),
+-- the Amazon listing with exactly the same products (packaging and carrier would be copied from it), the fee the
+-- channel has really charged, its weight, a status ("Ready" or what stands in the way) and notes (variations on one
+-- item number, the same products under two codes, a product with no weight, no fee seen yet).
+-- LESSON: the first version counted each Amazon listing's sales one listing at a time and took nearly two minutes —
+-- sales_ledger is a VIEW. Count once and join. Always time a report function before a page uses it.
+-- The body is in the database. See docs/EBAY_TIKTOK_LISTINGS_PROPOSAL.md.

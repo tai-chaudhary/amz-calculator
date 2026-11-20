@@ -1,0 +1,41 @@
+                                                                                                                                                                                             Regal Wholesale Ltd
+                                                                                                                                                                                         5 Riverview Business Park
+                                                                           Pro Forma Invoice : SO520190                                                                                         Shore Wood Road
+                                                                                                                                                                                         Bromborough, CH62 3RQ
+Customer Address                                                               Delivery Address                                                                                                        Merseyside
+Adrian Marsh Ltd                                                               Adrian Marsh Ltd                                                                                                       Great Britain
+Adrian Robert Marsh                                                            A IDREES
+Green Bank Farm                                                                Unit 1 Stoke Manor Farm
+Tern Hill                                                                      Stoke on tern
+Market Drayton,TF9 3PX                                                         Market Drayton ,TF9 2DU
+Great Britain
+
+
+
+Bill-to Customer No.      ADRI01                                                                                                            Phone No.                                          +44 151 346 1420
+External Document No.                                                                                                                       Home Page                                       www.regalsales.co.uk
+Document Date             25 August 2026                                                                                                    Email                                          info@regalsales.co.uk
+Shipment Date                                                                                                                               VAT Registration No.                                   GB414745359
+Order No.                 SO520190                                                                                                          EORI No.                                           GB414745359000
+Prices Including VAT      No                                                                                                                Bank                                                    Lloyds Bank
+Payment Terms             Pro Forma                                                                                                         Bank Branch No.                                              309511
+Payment Discount                                                                                                                            Account No.                                               01026276
+Shipment Method                                                                                                                             Salesperson                                            Mo Robinson
+VAT Registration No.      GB715424649                                                                                                       IBAN                                   GB64 LOYD 3095 1101 0262 76
+Currency                                                                                                                                    SWIFT Code                                           LOYD GB 21047
+
+                                                                                                                                                                                                        Page 1 / 1
+
+Code       Description                              Size    Pack     Commodity      Meursing     Origin       UN        Price       Qty   Value     VAT %        Net         Gross         PLTS    Retail Barcode
+                                                                     Code           Code                      Code                                             Weight        Weight
+
+26074      SANMEX FLY & WASP KILLER (300ml)         300ml          12 3808911010                 GB            UN1950       10.45   66    689.70        20          231.0     250.14       0.000 5010508014084
+11259      PLENTY FLEXISHEET KITCHEN TOWEL 160sht   2pk             6 4818209100                 GB                         15.27   21    320.67        20         53.676       58.8       0.000 7310361169470
+           FSC®
+
+
+
+                                                               Total Cubic Capacity 1.60                  Total Pallets 0.000                 Total Weight         284.68            Total GBP            1,010.37
+                                                                                                                                                                                   VAT Amount               202.07
+                                                                                                                                                                            Total GBP Incl. VAT           1,212.44
+

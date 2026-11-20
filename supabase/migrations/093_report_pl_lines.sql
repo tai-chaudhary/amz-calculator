@@ -1,0 +1,4 @@
+-- 093 (11-11-2026, already applied): report_pl_lines(from, to, channel) — every sale and refund in the dates with its
+-- listing, the parcels HELM booked for each order (service per parcel, so shipping is costed from the real labels),
+-- and Amazon's other charges. Costs are worked out in the portal (src/lib/pnl.js) with the Calculator's rules.
+-- Full definition in the database (Supabase migration "report_pl_lines").

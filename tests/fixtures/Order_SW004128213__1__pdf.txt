@@ -1,0 +1,70 @@
+Invoice
+Order # SW004128213
+
+Billing Address:                                    Delivery Address:                              Order number: SW004128213
+Adrian Marsh                                        TF9 2DU                                        Carrier: MFS Pallet
+Adrian Marsh LTD                                    Adrian Marsh                                   Order date: 11/08/2026 13:51
+Green Bank Farm                                     Adrian Marsh LTD                               Payment method: Card
+Tern Hill                                           Unit 1, Stoke Manor                            Order weight: 768.07 kg
+MARKET DRAYTON                                      Stoke on Tern
+                                                    MARKET DRAYTON
+United Kingdom, TF9 3PX
+01630 638800                                        United Kingdom, TF9 2DU
+operations@adrianmarshltd.co.uk                     07537171370
+
+
+
+
+                                                                                  Line                          Total ex        Vat          Vat
+ Part number                 Items                                              weight Units Packs     Price        Vat         rate    amount
+
+ CSW7.56.256.25              Single wall cardboard boxes                      151.20 kg 2250      90   £2.78     £250.20 20.00%           £50.04
+                             7.5x6.25x6.25 inches (191x159x159 mm) -
+                             pack of 25
+
+ CDW435X155X150              Double wall boxes                                141.84 kg    720    36 £10.40      £374.40 20.00%           £74.88
+                             17.25x6x6 inches (435x155x150mm) - pack
+                             of 20
+
+ CSW240X140X220              Single wall cardboard boxes                      184.14 kg 1350      54   £8.35     £450.90 20.00%           £90.18
+                             9.5x5.5x8.75 inches (240x140x220 mm) -
+                             pack of 25
+
+ CSW248X165X70-PP2           Book wrap mailer size 2                           16.25 kg    250     5 £14.99       £74.95 20.00%           £14.99
+                             248x165x70mm - pack of 50
+
+ PIK88-600                   Recycled kraft paper roll 90gsm                  113.00 kg     10    10 £11.02      £110.20 20.00%           £22.04
+                             600mmx210m
+
+ DISP-CRH/600E               600mm paper roll holder with cutter                3.84 kg       2    2 £28.17       £56.34 20.00%           £11.27
+
+ KM8                         Kite bubble lined mailer size 8, gold             48.00 kg 1600      16 £15.62      £249.92 20.00%           £49.98
+                             270x360 mm (10.75x14.25 inches) - pack of
+                             100
+
+ KM6                         Kite bubble lined mailer size 6, gold             36.80 kg 1600      16 £12.38      £198.08 20.00%           £39.62
+                             230x335 mm (8.75x13.25 inches) - pack of
+                             100
+
+ LAB-120X110-FRAGILE         Printed label                                     12.00 kg 5000      10   £5.24      £52.40 20.00%           £10.48
+                             FRAGILE - 120x110 mm - roll of 500
+
+ TPC075066A                  75mm x 66m packaging tape                         61.00 kg    240    10 £24.15      £241.50 20.00%           £48.30
+                             clear acrylic Kite tape - pack of 24 rolls
+
+ Sub total:                                                                768.07 kg                           £2,058.89                £411.78
+
+ Delivery:                                                                                                       £19.99 20.00%            £4.00
+
+                                                                                                                 Grand total:          £2,494.66
+
+
+
+ Delivery area:                                                                 UK mainland
+ Delivery class:                                                                Next day
+
+
+                                                                Kite Packaging Ltd
+                   kitepackaging.co.uk | Registered Office: Puma Park, 102-106 Scimitar Way, Coventry, West Midlands, CV3 4GB.
+                                    Registered in England & Wales: 04680835 VAT registration No 765 3496 93
+

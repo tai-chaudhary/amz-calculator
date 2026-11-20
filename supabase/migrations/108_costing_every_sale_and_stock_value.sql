@@ -1,0 +1,16 @@
+-- ALREADY APPLIED to the live database on 15-11-2026 (cost_rebuild() patched in place). A summary.
+--
+-- 108: every sale costed, and stock value at a date (v2.83.1).
+--   cost_rebuild():
+--     * a product sold before stock went live that never reached Inventory (sold out before the 17 Oct count) is now
+--       costed too — only packaging is left out. (188 sale lines had no cost because of this.)
+--     * an order whose only stock movement is its REPLACEMENT was sent out before stock went live: the sale itself is
+--       now costed as well. (25 lines.)
+--     * cost_draws (stock_item_id, seq, at, units, kind, order_ref): which layer every unit that left came from —
+--       rebuilt with the layers. Stock on hand at a date = each layer's units less its draws up to that date.
+--   report_stock(date): stock on hand at the end of a day (value, units, by source, top 15 products) and the pre-live
+--     stock section (brought in, sold at cost, left, revenue and fees shared by cost where an order mixed stock,
+--     start-up differences, replacements). For people who see costs and can open Reports.
+--   After this, the only sale lines with no cost are orders of the last few days not yet despatched, and one eBay line
+--   whose item number matches no product.
+select 1;
